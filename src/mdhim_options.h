@@ -61,9 +61,6 @@ typedef struct mdhim_options_t {
         //Maximum size of a slice. A ranger server may server several slices.
         uint64_t max_recs_per_slice; 
 
-	//Number of worker threads per range server
-	int num_wthreads;
-
 	//Login Credentials 
 	char *db_host;
 	char *dbs_host;

@@ -5,6 +5,62 @@
 #include "partitioner.h"
 #include "indexes.h"
 
+struct mdhim_rm_t *_open_db(struct mdhim_db_t *db, struct index_t *index,
+			    mdhim_options_t *opts) {
+	struct mdhim_rm_t *rm = NULL, *rm_itr = NULL;
+	struct mdhim_brm_t *brm = NULL;
+	struct mdhim_openm_t *openmsg = NULL, **openmsg_list = NULL;
+	rangesrv_list *rl, *rlp;
+	int i, j, ret, num_range_svrs, error = 0;
+
+	num_range_svrs = get_num_range_servers(opts->rserver_factor);
+
+	openmsg_list = malloc(sizeof(struct mdhim_openm_t*) * num_range_svrs);
+	for (i = 0, j = 0; i < mdhim_gdata.mdhim_comm_size; i ++) {
+		ret = is_range_server(db, i, index);
+		if (ret == 0) { /* not a range svr */
+			continue;
+		}
+
+		openmsg_list[j] = NULL;
+		openmsg = malloc(sizeof(struct mdhim_openm_t));
+		if (openmsg == NULL) {
+			/* TODO add error handling */
+			return NULL;
+		}
+		openmsg->basem.mtype = MDHIM_OPEN;
+		openmsg->basem.server_rank = i;
+		openmsg->db_type = opts->db_type;
+		openmsg->db_key_type = opts->db_key_type;
+		openmsg->db_create_new = opts->db_create_new;
+		openmsg->db_value_append = opts->db_value_append;
+		openmsg->debug_level = opts->debug_level;
+		memset(openmsg->db_path, '\0', PATH_MAX);
+		sprintf(openmsg->db_path, "%s/%s", opts->db_path, opts->db_name);
+		openmsg_list[j++] = openmsg;
+	}
+
+	brm = client_open(openmsg_list, num_range_svrs);
+
+	/* check \brm and turn it into \rm */
+	rm_itr = brm;
+	while (rm_itr) {
+		error = rm_itr->error;
+		if (error) {
+			break;
+		}
+		rm_itr = brm->next;
+	}
+
+	rm = malloc(sizeof(mdhim_rm_t));
+	if (rm_itr != NULL) {
+		rm->basem.server_rank = rm_itr->basem.server_rank;
+	}
+	rm->error = error;
+	free(brm);
+	return rm;
+}
+
 struct mdhim_rm_t *_put_record(struct mdhim_t *md, struct index_t *index, 
 			       void *key, int key_len, 
 			       void *value, int value_len) {

@@ -31,8 +31,24 @@ struct out_req {
 	MPI_Request *message;
 };
 
+/* open database */
+typedef struct mdhim_open_db {
+	int ref;
+	int db_type;
+	int db_key_type;
+	int db_value_append;
+	int debug_level;
+	char db_path[MDHIM_PATH_MAX]; /* db_path+name, key of hash table */
+
+	struct mdhim_store_t *mdhim_store;
+	UT_hash_handle hh;         /* makes this structure hashable */
+} mdhim_open_db_t;
+
 /* Range server specific data */
 typedef struct mdhim_rs_t {
+	//Number of worker threads per range server
+	int num_wthreads;
+
 	work_queue_t *work_queue;
 	pthread_mutex_t *work_queue_mutex;
 	pthread_cond_t *work_ready_cv;
@@ -40,6 +56,7 @@ typedef struct mdhim_rs_t {
 	pthread_t **workers;
 	struct index *indexes; /* A linked list of remote indexes that is served 
 				  (partially for fully) by this range server */
+	mdhim_open_db_t *opendbs; /* hash tables */
 	//Records seconds spent on putting records
 	long double put_time; 
 	//Records seconds spend on getting records
@@ -51,7 +68,7 @@ typedef struct mdhim_rs_t {
 } mdhim_rs_t;
 
 int range_server_add_work(struct mdhim_t *md, work_item *item);
-int range_server_init(struct mdhim_t *md);
+int range_server_init(struct mdhim_t *md, int num_wthreads);
 int range_server_init_comm(struct mdhim_t *md);
 int range_server_stop(struct mdhim_t *md);
 int range_server_add_oreq(struct mdhim_t *md, MPI_Request *req, void *msg); //Add an outstanding request

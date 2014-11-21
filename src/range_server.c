@@ -148,6 +148,65 @@ work_item *get_work(struct mdhim_t *md) {
 	return item;
 }
 
+/* XXX add lock to protect this hash table for the open/close
+ * race. Well behavied applications should not have such issues. */
+int _add_opendb(mdhim_open_db_t *opendb) {
+	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
+
+	HASH_ADD_STR(opendbs, db_path, opendb);
+	return 0;
+}
+
+int _del_opendb(char *path) {
+	mdhim_open_db_t *outdb = NULL;
+	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
+
+	HASH_FIND_STR(opendbs, path, outdb);
+	if (outdb != NULL) {
+		HASH_DEL(opendbs, outdb);
+		free(outdb);
+	}
+	return 0;
+}
+
+mdhim_open_db_t* _find_opendb(char *path) {
+	mdhim_open_db_t *outdb = NULL;
+	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
+
+	HASH_FIND_STR(opendbs, path, outdb);
+
+	return outdb;
+}
+
+/* increase refcount if finding opendb in hash */
+mdhim_open_db_t* _find_opendb_inc_ref(char *path) {
+	mdhim_open_db_t *outdb = NULL;
+	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
+
+	HASH_FIND_STR(opendbs, path, outdb);
+	if (outdb != NULL) outdb->ref ++;
+
+	return outdb;
+}
+
+/* decrease refcount if finding opendb in hash */
+mdhim_open_db_t* _find_opendb_dec_ref(char *path) {
+	mdhim_open_db_t *outdb = NULL;
+	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
+
+	HASH_FIND_STR(opendbs, path, outdb);
+	if (outdb != NULL && outdb->ref > 0) {
+		outdb->ref --;
+		if (outdb->ref == 0) {
+			HASH_DEL(opendbs, outdb);
+			free(outdb);
+			outdb = NULL;
+		}
+	}
+
+	return outdb;
+}
+
 /**
  * range_server_stop
  * Stop the range server (i.e., stops the threads and frees the relevant data in md)
@@ -166,7 +225,7 @@ int range_server_stop(struct mdhim_t *md) {
 	pthread_cond_broadcast(md->mdhim_rs->work_ready_cv);
 	pthread_join(md->mdhim_rs->listener, NULL);
 	/* Wait for the threads to finish */
-	for (i = 0; i < md->db_opts->num_wthreads; i++) {
+	for (i = 0; i < md->mdhim_rs->num_wthreads; i++) {
 		pthread_join(*md->mdhim_rs->workers[i], NULL);
 		free(md->mdhim_rs->workers[i]);
 	}
@@ -214,6 +273,74 @@ int range_server_stop(struct mdhim_t *md) {
 	md->mdhim_rs = NULL;
 
 	return MDHIM_SUCCESS;
+}
+
+/**
+ * range_server_open
+ * Handles the open message and create/open database
+ *
+ * @param md        pointer to the main MDHIM struct
+ * @param im        pointer to the open message to handle
+ * @param source    source of the message
+ * @return          MDHIM_SUCCESS or MDHIM_ERROR on error
+ */
+int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) {
+	int ret = MDHIM_SUCCESS, flags = MDHIM_CREATE;
+	struct mdhim_rm_t *rm;
+	struct mdhim_store_t *mdhim_store = NULL;
+	mdhim_open_db_t *opendb = NULL;
+
+	opendb = _find_opendb_inc_ref(om->db_path);
+	if (opendb != NULL) {
+		goto out;
+	}
+
+	opendb = malloc(sizeof(mdhim_open_db_t));
+	if (opendb == NULL) {
+		mlog(MDHIM_SERVER_CRIT, "MDHIM Rank %d: Error while allocating "
+		     "memory.", mdhim_gdata.mdhim_rank);
+		ret = MDHIM_ERROR;
+		goto out;
+	}
+
+	/* initialize mdhim_store */
+	mdhim_store = mdhim_db_init(om->db_type);
+
+	ret = mdhim_store->open(&mdhim_store->db_handle, &mdhim_store->db_stats,
+				om->db_path, flags, om->db_key_type,
+				NULL /* letting opts = NULL*/);
+	if (ret != 0) {
+		mlog(MDHIM_SERVER_CRIT, "MDHIM Rank %d: Error while opening "
+		     "database, ret %d.", mdhim_gdata.mdhim_rank, ret);
+		free(opendb);
+		ret = MDHIM_ERROR;
+		goto out;
+	}
+
+	/* initialize and add mdhim_store in opendbs table */
+	opendb->ref = 1;
+	opendb->db_type = om->db_type;
+	opendb->db_key_type = om->db_key_type;
+	opendb->db_value_append = om->db_value_append;
+	opendb->debug_level = om->debug_level;
+	strcpy(opendb->db_path, om->db_path);
+	opendb->mdhim_store = mdhim_store;
+
+	_add_opendb(opendb);
+
+out:
+	//Create the response message
+	rm = malloc(sizeof(struct mdhim_rm_t));
+	//Set the type
+	rm->basem.mtype = MDHIM_RECV;
+	//Set the operation return code as the error
+	rm->error = ret;
+	//Set the server's rank
+	rm->basem.server_rank = mdhim_gdata.mdhim_rank;
+
+	//Send response
+	ret = send_locally_or_remote(md, source, rm);
+	return ret;
 }
 
 /**
@@ -1081,6 +1208,10 @@ void *worker_thread(void *data) {
 //			     " from: %d\n", md->mdhim_rank, mtype, item->source);
 
 			switch(mtype) {
+			case MDHIM_OPEN:
+				range_server_open(md, item->message,
+						  item->source);
+				break;
 			case MDHIM_PUT:
 				//Pack the put message and pass to range_server_put
 				range_server_put(md, 
@@ -1222,7 +1353,7 @@ int range_server_clean_oreqs(struct mdhim_t *md) {
  * @param md  Pointer to the main MDHIM structure
  * @return    MDHIM_SUCCESS or MDHIM_ERROR on error
  */
-int range_server_init(struct mdhim_t *md) {
+int range_server_init(struct mdhim_t *md, int num_wthreads) {
 	int ret;
 	int i;
 
@@ -1244,6 +1375,7 @@ int range_server_init(struct mdhim_t *md) {
 	md->mdhim_rs->work_queue = malloc(sizeof(work_queue_t));
 	md->mdhim_rs->work_queue->head = NULL;
 	md->mdhim_rs->work_queue->tail = NULL;
+	md->mdhim_rs->num_wthreads = num_wthreads;
 
 	//Initialize the outstanding request list
 	md->mdhim_rs->out_req_list = NULL;
@@ -1292,7 +1424,7 @@ int range_server_init(struct mdhim_t *md) {
 	}
 	
 	//Initialize worker threads
-	md->mdhim_rs->workers = malloc(sizeof(pthread_t *) * md->db_opts->num_wthreads);
+	md->mdhim_rs->workers = malloc(sizeof(pthread_t *) * md->mdhim_rs->num_wthreads);
 	for (i = 0; i < md->db_opts->num_wthreads; i++) {
 		md->mdhim_rs->workers[i] = malloc(sizeof(pthread_t));
 		if ((ret = pthread_create(md->mdhim_rs->workers[i], NULL, 

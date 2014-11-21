@@ -24,35 +24,21 @@
  *
  */
 
+static struct mdhim_t mdhim_gdata;
 
 /**
  * mdhimInit
  * Initializes MDHIM - Collective call
  *
  * @param appComm  the communicator that was passed in from the application (e.g., MPI_COMM_WORLD)
- * @param opts Options structure for DB creation, such as name, and primary key type
- * @return mdhim_t* that contains info about this instance or NULL if there was an error
+ * @return int     zero on success, negative value if error.
  */
-struct mdhim_t *mdhimInit(void *appComm, struct mdhim_options_t *opts) {
+int mdhimInit(void *appComm, int num_wthreads) {
 	int ret = 0;
 	int flag, provided;
-	struct mdhim_t *md;
 	struct index_t *primary_index;
 	MPI_Comm comm;
 
-	if (!opts) {
-		//Set default options if no options were passed
-	        opts = mdhim_options_init();
-                mdhim_options_set_db_path(opts, "/tmp/hng/");
-                mdhim_options_set_db_name(opts, "mdhimDb");
-                mdhim_options_set_db_type(opts, LEVELDB);
-                mdhim_options_set_server_factor(opts, 1);
-                mdhim_options_set_max_recs_per_slice(opts, 1000);
-                mdhim_options_set_key_type(opts, MDHIM_BYTE_KEY);
-                mdhim_options_set_debug_level(opts, MLOG_CRIT);
-		mdhim_options_set_num_worker_threads(opts, 30);
-	}
-	
 	//Open mlog - stolen from plfs
 	ret = mlog_open((char *)"mdhim", 0,
 	        opts->debug_level, opts->debug_level, NULL, 0, MLOG_LOGPID, 0);
@@ -61,7 +47,7 @@ struct mdhim_t *mdhimInit(void *appComm, struct mdhim_options_t *opts) {
 	if ((ret = MPI_Initialized(&flag)) != MPI_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM - Error while calling MPI_Initialized");
 		exit(1);
-	}      
+	}
 	if (!flag) {
 		//Initialize MPI with multiple thread support since MPI hasn't been initialized
 		ret = MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
@@ -81,80 +67,69 @@ struct mdhim_t *mdhimInit(void *appComm, struct mdhim_options_t *opts) {
 	} else {
 		comm = MPI_COMM_WORLD;
 	}
-	
-	//Allocate memory for the main MDHIM structure
-	md = malloc(sizeof(struct mdhim_t));
-	memset(md, 0, sizeof(struct mdhim_t));
-	if (!md) {
-		mlog(MDHIM_CLIENT_CRIT, "MDHIM - Error while allocating memory while initializing");
-		return NULL;
-	}
 
-	//Set the options passed or the defaults created
-	md->db_opts = opts;
-
-	if ((ret = MPI_Comm_dup(comm, &md->mdhim_comm)) != MPI_SUCCESS) {
+	if ((ret = MPI_Comm_dup(comm, &mdhim_gdata.mdhim_comm)) != MPI_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "Error while initializing the MDHIM communicator");
 		return NULL;
 	}
 
 	//Get our rank in the main MDHIM communicator
-	if ((ret = MPI_Comm_rank(md->mdhim_comm, &md->mdhim_rank)) != MPI_SUCCESS) {
+	if ((ret = MPI_Comm_rank(mdhim_gdata.mdhim_comm, &mdhim_gdata.mdhim_rank)) != MPI_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "Error getting our rank while initializing MDHIM");
 		return NULL;
 	}
 
 	//Initialize mdhim_comm mutex
-	md->mdhim_comm_lock = malloc(sizeof(pthread_mutex_t));
-	if (!md->mdhim_comm_lock) {
+	mdhim_gdata.mdhim_comm_lock = malloc(sizeof(pthread_mutex_t));
+	if (!mdhim_gdata.mdhim_comm_lock) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Error while allocating memory for client", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
-	if ((ret = pthread_mutex_init(md->mdhim_comm_lock, NULL)) != 0) {    
+	if ((ret = pthread_mutex_init(mdhim_gdata.mdhim_comm_lock, NULL)) != 0) {    
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
-		     "Error while initializing mdhim_comm_lock", md->mdhim_rank);
+		     "Error while initializing mdhim_comm_lock", mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
 	//Dup the communicator passed in for barriers between clients
-	if ((ret = MPI_Comm_dup(comm, &md->mdhim_client_comm)) != MPI_SUCCESS) {
+	if ((ret = MPI_Comm_dup(comm, &mdhim_gdata.mdhim_client_comm)) != MPI_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "Error while initializing the MDHIM communicator");
 		return NULL;
 	}
 
 	//Get the size of the main MDHIM communicator
-	if ((ret = MPI_Comm_size(md->mdhim_comm, &md->mdhim_comm_size)) != MPI_SUCCESS) {
+	if ((ret = MPI_Comm_size(mdhim_gdata.mdhim_comm, &mdhim_gdata.mdhim_comm_size)) != MPI_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error getting the size of the " 
 		     "comm while initializing", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
 	//Initialize receive msg mutex - used for receiving a message from myself
-	md->receive_msg_mutex = malloc(sizeof(pthread_mutex_t));
-	if (!md->receive_msg_mutex) {
+	mdhim_gdata.receive_msg_mutex = malloc(sizeof(pthread_mutex_t));
+	if (!mdhim_gdata.receive_msg_mutex) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Error while allocating memory for client", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
-	if ((ret = pthread_mutex_init(md->receive_msg_mutex, NULL)) != 0) {    
+	if ((ret = pthread_mutex_init(mdhim_gdata.receive_msg_mutex, NULL)) != 0) {    
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Error while initializing receive queue mutex", md->mdhim_rank);
 		return NULL;
 	}
 	//Initialize the receive condition variable - used for receiving a message from myself
-	md->receive_msg_ready_cv = malloc(sizeof(pthread_cond_t));
-	if (!md->receive_msg_ready_cv) {
+	mdhim_gdata.receive_msg_ready_cv = malloc(sizeof(pthread_cond_t));
+	if (!mdhim_gdata.receive_msg_ready_cv) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Error while allocating memory for client", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
-	if ((ret = pthread_cond_init(md->receive_msg_ready_cv, NULL)) != 0) {
+	if ((ret = pthread_cond_init(mdhim_gdata.receive_msg_ready_cv, NULL)) != 0) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Error while initializing client receive condition variable", 
 		     md->mdhim_rank);
@@ -164,32 +139,74 @@ struct mdhim_t *mdhimInit(void *appComm, struct mdhim_options_t *opts) {
 	//Initialize the partitioner
 	partitioner_init();
 
-	//Initialize the indexes and create the primary index
-	md->indexes = NULL;
-	md->indexes_lock = malloc(sizeof(pthread_rwlock_t));
-	if (pthread_rwlock_init(md->indexes_lock, NULL) != 0) {
-		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
-		     "Error while initializing remote_indexes_lock", 
-		     md->mdhim_rank);
-		return NULL;
-	}
+	range_server_init(&mdhim_gdata, num_wthreads);
 
-	//Create the default remote primary index
-	primary_index = create_global_index(md, opts->rserver_factor, opts->max_recs_per_slice, 
-					    opts->db_type, opts->db_key_type);
-	if (!primary_index) {
-		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
-		     "Couldn't create the default index", 
-		     md->mdhim_rank);
-		return NULL;
-	}
-	md->primary_index = primary_index;
-	
 	//Set the local receive queue to NULL - used for sending and receiving to/from ourselves
-	md->receive_msg = NULL;
-	MPI_Barrier(md->mdhim_client_comm);
+	mdhim_gdata.receive_msg = NULL;
+	MPI_Barrier(mdhim_gdata.mdhim_client_comm);
 
 	return md;
+}
+
+int mdhimFinalize() {
+	/* stop threads */
+	/* freeing communicator */
+}
+
+mdhim_db_t* mdhimOpen(struct mdhim_options_t *ops) {
+	int ret;
+	mdhim_db_t *db = NULL;
+	mdhim_rm_t *rm = NULL;
+
+	db = malloc(sizeof(mdhim_db_t));
+	if (db == NULL) {
+		return NULL;
+	}
+	if (!opts) {
+		//Set default options if no options were passed
+	        opts = mdhim_options_init();
+                mdhim_options_set_db_path(opts, "/tmp/hng/");
+                mdhim_options_set_db_name(opts, "mdhimDb");
+                mdhim_options_set_db_type(opts, LEVELDB);
+                mdhim_options_set_server_factor(opts, 1);
+                mdhim_options_set_max_recs_per_slice(opts, 1000);
+                mdhim_options_set_key_type(opts, MDHIM_BYTE_KEY);
+                mdhim_options_set_debug_level(opts, MLOG_CRIT);
+		mdhim_options_set_num_worker_threads(opts, 30);
+	}
+
+	//Initialize the indexes and create the primary index
+	db->indexes = NULL;
+
+	//Create the default remote primary index
+	primary_index = create_global_index(db, opts->rserver_factor, opts->max_recs_per_slice, 
+					    opts->db_type, opts->db_key_type);
+	if (!primary_index) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
+		     "Couldn't create the default index",
+		     mdhim_gdata.mdhim_rank);
+		return NULL;
+	}
+	db->primary_index = primary_index;
+
+	ret = get_rangesrvs(db, db->primary_index);
+	if (ret != MDHIM_SUCCESS) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
+		     "Couldn't get range servers.",
+		     mdhim_gdata.mdhim_rank);
+		return NULL;
+	}
+
+	rm = _open_db(db->primary_index, opts);
+	if (rm->error != MDHIM_SUCCESS) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
+		     "Couldn't open physical database",
+		     mdhim_gdata.mdhim_rank);
+		free(db);
+		db = NULL;
+	}
+
+	return db;
 }
 
 /**

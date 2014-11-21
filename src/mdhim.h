@@ -53,13 +53,6 @@ struct mdhim_t {
 	int mdhim_comm_size;
 	//Flag to indicate mdhimClose was called
 	volatile int shutdown;
-	//A pointer to the primary index
-	struct index_t *primary_index;
-	//A linked list of range servers
-	struct index_t *indexes;
-
-	//Lock to allow concurrent readers and a single writer to the remote_indexes hash table
-	pthread_rwlock_t *indexes_lock;
 
 	//The range server structure which is used only if we are a range server
 	mdhim_rs_t *mdhim_rs; 
@@ -70,9 +63,26 @@ struct mdhim_t {
 	/* The receive msg, which is sent to the client by the 
 	   range server running in the same process */
 	void *receive_msg;
+};
+
+struct mdhim_db {
+	int mdhim_rank;
+	int mdhim_comm_size;
+
+	//A pointer to the primary index
+	struct index_t *primary_index;
+	//A linked list of range servers
+	struct index_t *indexes;
+
+	//Lock to allow concurrent readers and a single writer to the remote_indexes hash table
+	pthread_rwlock_t *indexes_lock;
+
         //Options for DB creation
         mdhim_options_t *db_opts;
+
+	rangesrv_info *rs_info;
 };
+typedef struct mdhim_db mdhim_db_t;
 
 struct secondary_info {
 	struct index_t *secondary_index;
@@ -90,7 +100,11 @@ struct secondary_bulk_info {
 	int info_type;
 };
 
-struct mdhim_t *mdhimInit(void *appComm, struct mdhim_options_t *opts);
+extern struct mdhim_t mdhim_gdata;
+
+struct mdhim_t *mdhimInit(void *appComm);
+int mdhimFinalize();
+struct mdhimdb_t *mdhimOpen(struct mdhim_options_t *opts);
 int mdhimClose(struct mdhim_t *md);
 int mdhimCommit(struct mdhim_t *md, struct index_t *index);
 int mdhimStatFlush(struct mdhim_t *md, struct index_t *index);

@@ -29,6 +29,8 @@ extern "C"
 #define MDHIM_RECV_BULK_GET 9
 //Commit message
 #define MDHIM_COMMIT 10
+//Open message
+#define MDHIM_OPEN 11
 
 /* Operations for getting a key/value */
 //Get the value for the specified key
@@ -55,6 +57,8 @@ extern "C"
 
 //#define MAX_BULK_OPS 1000000
 #define MAX_BULK_OPS 500000
+
+#define MDHIM_PATH_MAX (1024)
 
 //Maximum size of messages allowed
 #define MDHIM_MAX_MSG_SIZE 2147483647
@@ -132,6 +136,18 @@ struct mdhim_bdelm_t {
 	int num_keys;
 };
 
+/* open database message */
+struct mdhim_openm_t {
+	mdhim_basem_t basem;
+	int db_type;
+	int db_key_type;
+	int db_create_new;
+	int db_value_append;
+	int debug_level;
+	char db_path[MDHIM_PATH_MAX]; /* db_path+name */
+	/* not using user/passwd etc for now. */
+};
+
 /* Range server info message */
 struct mdhim_rsi_t {
 	//The range server number, which is a number 1 - N where N is the number of servers
@@ -172,6 +188,9 @@ int send_client_response(struct mdhim_t *md, int dest, void *message, int *sizeb
 int receive_client_response(struct mdhim_t *md, int src, void **message);
 int receive_all_client_responses(struct mdhim_t *md, int *srcs, int nsrcs, 
 				 void ***messages);
+int pack_open_message(struct mdhim_t *md, struct mdhim_openm_t *om, void **sendbuf, int *sendsize);
+int unpack_open_message(struct mdhim_t *md, void *message, int mesg_size,  void **openm);
+
 int pack_put_message(struct mdhim_t *md, struct mdhim_putm_t *pm, void **sendbuf, int *sendsize);
 int pack_bput_message(struct mdhim_t *md, struct mdhim_bputm_t *bpm, void **sendbuf, int *sendsize);
 int unpack_put_message(struct mdhim_t *md, void *message, int mesg_size, void **pm);
