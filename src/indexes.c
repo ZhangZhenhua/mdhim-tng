@@ -909,7 +909,7 @@ void indexes_release(struct mdhim_t *md) {
 				//Write the manifest
 				write_manifest(md, cur_indx);
 			}
-			
+#if 0
 			//Close the database
 			if ((ret = cur_indx->mdhim_store->close(cur_indx->mdhim_store->db_handle, 
 								cur_indx->mdhim_store->db_stats)) 
@@ -917,7 +917,7 @@ void indexes_release(struct mdhim_t *md) {
 				mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error closing database", 
 				     md->mdhim_rank);
 			}
-			
+#endif
 			pthread_rwlock_destroy(cur_indx->mdhim_store->mdhim_store_stats_lock);
 			free(cur_indx->mdhim_store->mdhim_store_stats_lock);
 			if (cur_indx->type != LOCAL_INDEX) {

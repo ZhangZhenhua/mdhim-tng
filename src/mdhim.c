@@ -148,9 +148,67 @@ int mdhimInit(void *appComm, int num_wthreads) {
 	return md;
 }
 
+/**
+ * Quits the MDHIM instance - collective call
+ *
+ * @return MDHIM_SUCCESS or MDHIM_ERROR on error
+ */
 int mdhimFinalize() {
-	/* stop threads */
-	/* freeing communicator */
+	int ret;
+	struct timeval start, end;
+
+	mlog(MDHIM_CLIENT_DBG, "MDHIM Rank %d: Called finalize", mdhim_gdata.mdhim_rank);
+	gettimeofday(&start, NULL);
+	MPI_Barrier(md->mdhim_client_comm);
+	gettimeofday(&end, NULL);
+	printf("Took: %lu seconds to complete first finalize barrier\n",
+		end.tv_sec - start.tv_sec);
+
+	gettimeofday(&start, NULL);
+	//Stop range server if I'm a range server
+	if (md->mdhim_rs && (ret = range_server_stop(md)) != MDHIM_SUCCESS) {
+		return MDHIM_ERROR;
+	}
+
+	gettimeofday(&end, NULL);
+	printf("Took: %lu seconds to stop the range server\n", end.tv_sec - start.tv_sec);
+
+	//Free up memory used by the partitioner
+	partitioner_release();
+
+	//Destroy the receive condition variable
+	if ((ret = pthread_cond_destroy(mdhim_gdata.receive_msg_ready_cv)) != 0) {
+		return MDHIM_ERROR;
+	}
+	free(mdhim_gdata.receive_msg_ready_cv);
+
+	//Destroy the receive mutex
+	if ((ret = pthread_mutex_destroy(mdhim_gdata.receive_msg_mutex)) != 0) {
+		return MDHIM_ERROR;
+	}
+	free(mdhim_gdata.receive_msg_mutex);
+
+	gettimeofday(&start, NULL);
+	MPI_Barrier(mdhim_gdata.mdhim_client_comm);
+	//Destroy the client_comm_lock
+	if ((ret = pthread_mutex_destroy(mdhim_gdata.mdhim_comm_lock)) != 0) {
+		return MDHIM_ERROR;
+	}
+	gettimeofday(&end, NULL);
+	free(mdhim_gdata.mdhim_comm_lock);
+	printf("Took: %lu seconds to complete the second finalize barrier\n",
+		end.tv_sec - start.tv_sec);
+	mlog(MDHIM_CLIENT_DBG, "MDHIM Rank %d: Finished finalize",
+		mdhim_gdata.mdhim_rank);
+
+	MPI_Comm_free(&mdhim_gdata.mdhim_client_comm);
+	MPI_Comm_free(&mdhim_gdata.mdhim_comm);
+        free(md);
+
+	//Close MLog
+	mlog_close();
+
+	return MDHIM_SUCCESS;
 }
 
 mdhim_db_t* mdhimOpen(struct mdhim_options_t *ops) {
@@ -209,73 +267,10 @@ mdhim_db_t* mdhimOpen(struct mdhim_options_t *ops) {
 	return db;
 }
 
-/**
- * Quits the MDHIM instance - collective call
- *
- * @param md main MDHIM struct
- * @return MDHIM_SUCCESS or MDHIM_ERROR on error
- */
-int mdhimClose(struct mdhim_t *md) {
-	int ret;
-	struct timeval start, end;
-
-	mlog(MDHIM_CLIENT_DBG, "MDHIM Rank %d: Called close", md->mdhim_rank);
-	gettimeofday(&start, NULL);
-	MPI_Barrier(md->mdhim_client_comm);
-	gettimeofday(&end, NULL);
-	printf("Took: %lu seconds to complete first close barrier\n", end.tv_sec - start.tv_sec);
-
-	gettimeofday(&start, NULL);
-	//Stop range server if I'm a range server	
-	if (md->mdhim_rs && (ret = range_server_stop(md)) != MDHIM_SUCCESS) {
-		return MDHIM_ERROR;
-	}
-	
-	gettimeofday(&end, NULL);
-	printf("Took: %lu seconds to stop the range server\n", end.tv_sec - start.tv_sec);
-
-	//Free up memory used by the partitioner
-	partitioner_release();
-
+int mdhimClose() {
 	//Free up memory used by indexes
-	indexes_release(md);
+	indexes_release(&mdhim_gdata);
 
-	//Destroy the receive condition variable
-	if ((ret = pthread_cond_destroy(md->receive_msg_ready_cv)) != 0) {
-		return MDHIM_ERROR;
-	}
-	free(md->receive_msg_ready_cv);
-
-	//Destroy the receive mutex
-	if ((ret = pthread_mutex_destroy(md->receive_msg_mutex)) != 0) {
-		return MDHIM_ERROR;
-	}
-	free(md->receive_msg_mutex);    
-
-	if ((ret = pthread_rwlock_destroy(md->indexes_lock)) != 0) {
-		return MDHIM_ERROR;
-	}
-	free(md->indexes_lock);
-
-	gettimeofday(&start, NULL);
-	MPI_Barrier(md->mdhim_client_comm);
-	//Destroy the client_comm_lock
-	if ((ret = pthread_mutex_destroy(md->mdhim_comm_lock)) != 0) {
-		return MDHIM_ERROR;
-	}
-	gettimeofday(&end, NULL);
-	free(md->mdhim_comm_lock);    
-	printf("Took: %lu seconds to complete the second close barrier\n", end.tv_sec - start.tv_sec);
-	mlog(MDHIM_CLIENT_DBG, "MDHIM Rank %d: Finished close", md->mdhim_rank);
-
-	MPI_Comm_free(&md->mdhim_client_comm);
-	MPI_Comm_free(&md->mdhim_comm);
-        free(md);
-
-	//Close MLog
-	mlog_close();
-
-	return MDHIM_SUCCESS;
 }
 
 /**
