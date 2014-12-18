@@ -230,7 +230,6 @@ mdhim_db_t* mdhimOpen(struct mdhim_options_t *ops) {
                 mdhim_options_set_max_recs_per_slice(opts, 1000);
                 mdhim_options_set_key_type(opts, MDHIM_BYTE_KEY);
                 mdhim_options_set_debug_level(opts, MLOG_CRIT);
-		mdhim_options_set_num_worker_threads(opts, 30);
 	}
 
 	//Initialize the indexes and create the primary index
@@ -255,22 +254,43 @@ mdhim_db_t* mdhimOpen(struct mdhim_options_t *ops) {
 		return NULL;
 	}
 
-	rm = _open_db(db->primary_index, opts);
-	if (rm->error != MDHIM_SUCCESS) {
+	rm = _open_db(db);
+	if (rm != NULL && rm->error != MDHIM_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
 		     "Couldn't open physical database",
 		     mdhim_gdata.mdhim_rank);
 		free(db);
 		db = NULL;
 	}
+	mdhim_full_release_msg(rm);
 
 	return db;
 }
 
-int mdhimClose() {
-	//Free up memory used by indexes
-	indexes_release(&mdhim_gdata);
+int mdhimClose(mdhim_db_t *db) {
+	int ret = 0;
+	mdhim_rm_t *rm = NULL;
 
+	// send "close" command to range servers
+	rm = _close_db(db);
+	if (rm != NULL && rm->error != MDHIM_SUCCESS) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
+		     "Couldn't close physical database",
+		     mdhim_gdata.mdhim_rank);
+		ret = rm->error;
+		mdhim_full_release_msg(rm);
+		goto out;
+	}
+	mdhim_full_release_msg(rm);
+
+	// Free up memory used by indexes
+	indexes_release(db);
+
+	// Free up memory used by db
+	free(db);
+
+out:
+	return ret;
 }
 
 /**

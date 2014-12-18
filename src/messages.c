@@ -67,7 +67,7 @@ int send_rangesrv_work(struct mdhim_t *md, int dest, void *message) {
 		return_code = pack_base_message(md, (struct mdhim_basem_t *)message, &sendbuf, 
 						&sendsize);
 		break;
-	case MDHIM_CLOSE:
+	case MDHIM_FINALIZE:
 		return_code = pack_base_message(md, (struct mdhim_basem_t *)message, &sendbuf, 
 						&sendsize);
 		break;
@@ -176,6 +176,10 @@ int send_all_rangesrv_work(struct mdhim_t *md, void **messages, int num_srvs) {
 			break;
 		case MDHIM_OPEN:
 			return_code = pack_open_message(md, (struct mdhim_openm_t*)mesg, &sendbuf,
+							&sendsize);
+			break;
+		case MDHIM_CLOSE:
+			return_code = pack_close_message(md, (struct mdhim_closem_t*)mesg, &sendbuf,
 							&sendsize);
 			break;
 		default:
@@ -288,7 +292,7 @@ int send_all_rangesrv_work(struct mdhim_t *md, void **messages, int num_srvs) {
  * @param md      in   main MDHIM struct
  * @param message out  double pointer for message received
  * @param src     out  pointer to source of message received
- * @return MDHIM_SUCCESS, MDHIM_CLOSE, MDHIM_COMMIT, or MDHIM_ERROR on error
+ * @return MDHIM_SUCCESS, MDHIM_FINALIZE, MDHIM_COMMIT, or MDHIM_ERROR on error
  */
 int receive_rangesrv_work(struct mdhim_t *md, int *src, void **message) {
 	MPI_Status status;
@@ -413,8 +417,8 @@ int receive_rangesrv_work(struct mdhim_t *md, int *src, void **message) {
 	case MDHIM_COMMIT:
 		ret = MDHIM_COMMIT;
 		break;
-	case MDHIM_CLOSE:
-		ret = MDHIM_CLOSE;
+	case MDHIM_FINALIZE:
+		ret = MDHIM_FINALIZE;
 		break;
 	default:
 		break;
@@ -782,7 +786,8 @@ int pack_open_message(struct mdhim_t *md, struct mdhim_openm_t *om, void **sendb
 
         if (m_size > MDHIM_MAX_MSG_SIZE) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: open message too large."
-                     " Open is over Maximum size allowed of %d.", md->mdhim_rank, MDHIM_MAX_MSG_SIZE);
+                     " Open is over Maximum size allowed of %d.",
+		     md->mdhim_rank, MDHIM_MAX_MSG_SIZE);
 		return MDHIM_ERROR;
         }
 
@@ -800,13 +805,13 @@ int pack_open_message(struct mdhim_t *md, struct mdhim_openm_t *om, void **sendb
 
 	outbuf = *sendbuf;
         // pack the message first with the structure and then followed by key and data values.
-	return_code = MPI_Pack(om, sizeof(struct mdhim_putm_t), MPI_CHAR, outbuf, mesg_size, 
+	return_code = MPI_Pack(om, sizeof(struct mdhim_openm_t), MPI_CHAR, outbuf, mesg_size, 
 			       &mesg_idx, md->mdhim_comm);
 
 	// If the pack did not succeed then log the error and return the error code
 	if ( return_code != MPI_SUCCESS ) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to pack "
-                     "the put message.", md->mdhim_rank);
+                     "the open message.", md->mdhim_rank);
 		return MDHIM_ERROR;
         }
 
@@ -834,6 +839,75 @@ int unpack_open_message(struct mdhim_t *md, void *message, int mesg_size,  void 
 	if ( return_code != MPI_SUCCESS ) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to unpack "
                      "the open message.", md->mdhim_rank);
+		return MDHIM_ERROR;
+        }
+
+	return MDHIM_SUCCESS;
+}
+
+int pack_close_message(struct mdhim_t *md, struct mdhim_closem_t *cm,
+		       void **sendbuf, int *sendsize) {
+	int return_code = MPI_SUCCESS;  // MPI_SUCCESS = 0
+        int64_t m_size = sizeof(struct mdhim_closem_t); // Generous variable for size calculation
+        int mesg_size;  // Variable to be used as parameter for MPI_pack of safe size
+	int mesg_idx = 0;  // Variable for incremental pack
+        void *outbuf;
+
+        if (m_size > MDHIM_MAX_MSG_SIZE) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: close message too large."
+                     " Close is over Maximum size allowed of %d.",
+		     md->mdhim_rank, MDHIM_MAX_MSG_SIZE);
+		return MDHIM_ERROR;
+        }
+
+	//Set output variable for the size to send
+	mesg_size = (int) m_size;
+        *sendsize = mesg_size;
+	cm->basem.size = mesg_size;
+
+        // Is the computed message size of a safe value? (less than a max message size?)
+        if ((*sendbuf = malloc(mesg_size * sizeof(char))) == NULL) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to allocate "
+                     "memory to pack close message.", md->mdhim_rank);
+		return MDHIM_ERROR;
+        }
+
+	outbuf = *sendbuf;
+        // pack the message first with the structure and then followed by key and data values.
+	return_code = MPI_Pack(cm, sizeof(struct mdhim_closem_t), MPI_CHAR, outbuf, mesg_size, 
+			       &mesg_idx, md->mdhim_comm);
+
+	// If the pack did not succeed then log the error and return the error code
+	if ( return_code != MPI_SUCCESS ) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to pack "
+                     "the close message.", md->mdhim_rank);
+		return MDHIM_ERROR;
+        }
+
+	return MDHIM_SUCCESS;
+}
+
+int unpack_close_message(struct mdhim_t *md, void *message, int mesg_size,  void **closem) {
+	int return_code = MPI_SUCCESS;  // MPI_SUCCESS = 0
+	int mesg_idx = 0;  // Variable for incremental unpack
+        struct mdhim_closem_t *cm = NULL;
+
+        if ((*((struct mdhim_closem_t **) cm) = malloc(sizeof(struct mdhim_closem_t))) == NULL) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to allocate "
+                     "memory to unpack close message.", md->mdhim_rank);
+		return MDHIM_ERROR;
+        }
+
+	cm = *((struct mdhim_closem_t **) closem);
+        // Unpack the message first with the structure and then followed by key and data values.
+        return_code = MPI_Unpack(message, mesg_size, &mesg_idx, cm,
+				 sizeof(struct mdhim_closem_t), MPI_CHAR,
+				 md->mdhim_comm);
+
+	// If the unpack did not succeed then log the error and return the error code
+	if ( return_code != MPI_SUCCESS ) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to unpack "
+                     "the close message.", md->mdhim_rank);
 		return MDHIM_ERROR;
         }
 

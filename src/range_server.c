@@ -198,9 +198,10 @@ mdhim_open_db_t* _find_opendb_dec_ref(char *path) {
 	if (outdb != NULL && outdb->ref > 0) {
 		outdb->ref --;
 		if (outdb->ref == 0) {
+			/* Just remove it from hash table. Caller will
+			 * take care of this zero-refcount object.
+			 */
 			HASH_DEL(opendbs, outdb);
-			free(outdb);
-			outdb = NULL;
 		}
 	}
 
@@ -280,7 +281,7 @@ int range_server_stop(struct mdhim_t *md) {
  * Handles the open message and create/open database
  *
  * @param md        pointer to the main MDHIM struct
- * @param im        pointer to the open message to handle
+ * @param om        pointer to the open message to handle
  * @param source    source of the message
  * @return          MDHIM_SUCCESS or MDHIM_ERROR on error
  */
@@ -327,6 +328,58 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 	opendb->mdhim_store = mdhim_store;
 
 	_add_opendb(opendb);
+
+out:
+	//Create the response message
+	rm = malloc(sizeof(struct mdhim_rm_t));
+	//Set the type
+	rm->basem.mtype = MDHIM_RECV;
+	//Set the operation return code as the error
+	rm->error = ret;
+	//Set the server's rank
+	rm->basem.server_rank = mdhim_gdata.mdhim_rank;
+
+	//Send response
+	ret = send_locally_or_remote(md, source, rm);
+	return ret;
+}
+
+/**
+ * range_server_close
+ * Handles the close message and close database
+ *
+ * @param md        pointer to the main MDHIM struct
+ * @param cm        pointer to the open message to handle
+ * @param source    source of the message
+ * @return          MDHIM_SUCCESS or MDHIM_ERROR on error
+ */
+int range_server_close(struct mdhim_t *md, struct mdhim_closem_t *cm, int source) {
+	int ret = MDHIM_SUCCESS;
+	struct mdhim_rm_t *rm;
+	struct mdhim_store_t *mdhim_store = NULL;
+	mdhim_open_db_t *opendb = NULL;
+
+	opendb = _find_opendb_dec_ref(cm->db_path);
+	if (opendb == NULL) {
+		/* return error??? */
+		goto out;
+	}
+
+	if (opendb->ref > 0) {
+		/* other siblings hold its ref */
+		goto out;
+	}
+
+	/* close it for real */
+	mdhim_store = opendb->mdhim_store;
+	ret = mdhim_store->close(mdhim_store->db_handle, mdhim_store->db_stats);
+	if (ret != 0) {
+		mlog(MDHIM_SERVER_CRIT, "MDHIM Rank %d: Error while closeing "
+		     "database, ret %d.", mdhim_gdata.mdhim_rank, ret);
+		ret = MDHIM_ERROR;
+		goto out;
+	}
+	free(opendb);
 
 out:
 	//Create the response message
@@ -1210,6 +1263,10 @@ void *worker_thread(void *data) {
 			switch(mtype) {
 			case MDHIM_OPEN:
 				range_server_open(md, item->message,
+						  item->source);
+				break;
+			case MDHIM_CLOSE:
+				range_server_close(md, item->message,
 						  item->source);
 				break;
 			case MDHIM_PUT:

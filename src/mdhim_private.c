@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include "mdhim.h"
 #include "client.h"
@@ -5,14 +6,16 @@
 #include "partitioner.h"
 #include "indexes.h"
 
-struct mdhim_rm_t *_open_db(struct mdhim_db_t *db, struct index_t *index,
-			    mdhim_options_t *opts) {
-	struct mdhim_rm_t *rm = NULL, *rm_itr = NULL;
-	struct mdhim_brm_t *brm = NULL;
+struct mdhim_rm_t *_open_db(struct mdhim_db *db) {
+	struct mdhim_rm_t *rm = NULL;
+	struct mdhim_brm_t *brm = NULL, *rm_itr = NULL;
 	struct mdhim_openm_t *openmsg = NULL, **openmsg_list = NULL;
-	rangesrv_list *rl, *rlp;
+	struct index_t *index = NULL;
+	mdhim_options_t *opts = NULL;
 	int i, j, ret, num_range_svrs, error = 0;
 
+	opts = db->db_opts;
+	index = db->primary_index;
 	num_range_svrs = get_num_range_servers(opts->rserver_factor);
 
 	openmsg_list = malloc(sizeof(struct mdhim_openm_t*) * num_range_svrs);
@@ -35,7 +38,7 @@ struct mdhim_rm_t *_open_db(struct mdhim_db_t *db, struct index_t *index,
 		openmsg->db_create_new = opts->db_create_new;
 		openmsg->db_value_append = opts->db_value_append;
 		openmsg->debug_level = opts->debug_level;
-		memset(openmsg->db_path, '\0', PATH_MAX);
+		memset(openmsg->db_path, '\0', MDHIM_PATH_MAX);
 		sprintf(openmsg->db_path, "%s/%s", opts->db_path, opts->db_name);
 		openmsg_list[j++] = openmsg;
 	}
@@ -52,12 +55,67 @@ struct mdhim_rm_t *_open_db(struct mdhim_db_t *db, struct index_t *index,
 		rm_itr = brm->next;
 	}
 
-	rm = malloc(sizeof(mdhim_rm_t));
+	rm = malloc(sizeof(struct mdhim_rm_t));
 	if (rm_itr != NULL) {
 		rm->basem.server_rank = rm_itr->basem.server_rank;
 	}
 	rm->error = error;
-	free(brm);
+	mdhim_full_release_msg(brm);
+	return rm;
+}
+
+struct mdhim_rm_t *_close_db(struct mdhim_db *db) {
+	struct mdhim_rm_t *rm = NULL;
+	struct mdhim_brm_t *brm = NULL, *rm_itr = NULL;
+	struct mdhim_closem_t *closemsg = NULL, **closemsg_list = NULL;
+	struct index_t *index = NULL;
+	mdhim_options_t *opts = NULL;
+	int i, j, ret, num_range_svrs, error = 0;
+
+	opts = db->db_opts;
+	index = db->primary_index;
+	num_range_svrs = get_num_range_servers(opts->rserver_factor);
+
+	closemsg_list = malloc(sizeof(struct mdhim_closem_t*) * num_range_svrs);
+	for (i = 0, j = 0; i < mdhim_gdata.mdhim_comm_size; i ++) {
+		ret = is_range_server(db, i, index);
+		if (ret == 0) { /* not a range svr */
+			continue;
+		}
+
+		closemsg_list[j] = NULL;
+		closemsg = malloc(sizeof(struct mdhim_closem_t));
+		if (closemsg == NULL) {
+			/* TODO add error handling */
+			return NULL;
+		}
+		closemsg->basem.mtype = MDHIM_CLOSE;
+		closemsg->basem.server_rank = i;
+		closemsg->db_type = opts->db_type;
+		closemsg->db_key_type = opts->db_key_type;
+		memset(closemsg->db_path, '\0', MDHIM_PATH_MAX);
+		sprintf(closemsg->db_path, "%s/%s", opts->db_path, opts->db_name);
+		closemsg_list[j++] = closemsg;
+	}
+
+	brm = client_close(closemsg_list, num_range_svrs);
+
+	/* check \brm and turn it into \rm */
+	rm_itr = brm;
+	while (rm_itr) {
+		error = rm_itr->error;
+		if (error) {
+			break;
+		}
+		rm_itr = brm->next;
+	}
+
+	rm = malloc(sizeof(struct mdhim_rm_t));
+	if (rm_itr != NULL) {
+		rm->basem.server_rank = rm_itr->basem.server_rank;
+	}
+	rm->error = error;
+	mdhim_full_release_msg(brm);
 	return rm;
 }
 

@@ -4,8 +4,7 @@
 #include "mdhim.h"
 
 struct mdhim_db;
-struct mdhim_rm_t *_open_db(struct mdhim_db *db, struct index_t *index,
-			    mdhim_options_t *opts);
+struct mdhim_rm_t *_open_db(struct mdhim_db *db);
 struct mdhim_rm_t *_put_record(struct mdhim_t *md, struct index_t *index, 
 			       void *key, int key_len, 
 			       void *value, int value_len);

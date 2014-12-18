@@ -878,7 +878,7 @@ struct index_t *get_index(struct mdhim_t *md, int index_id) {
 	return index;
 }
 
-void indexes_release(struct mdhim_t *md) {
+void indexes_release(mdhim_db_t *md) {
 	struct index_t *cur_indx, *tmp_indx;
 	struct rangesrv_info *cur_rs, *tmp_rs;
 	int ret;
@@ -898,6 +898,7 @@ void indexes_release(struct mdhim_t *md) {
 		
 		//Clean up the storage if I'm a range server for this index
 		if (cur_indx->myinfo.rangesrv_num > 0) {
+#if 0
 			//Write the stats to the database
 			if ((ret = write_stats(md, cur_indx)) != MDHIM_SUCCESS) {
 				mlog(MDHIM_SERVER_CRIT, "MDHIM Rank: %d - " 
@@ -909,7 +910,6 @@ void indexes_release(struct mdhim_t *md) {
 				//Write the manifest
 				write_manifest(md, cur_indx);
 			}
-#if 0
 			//Close the database
 			if ((ret = cur_indx->mdhim_store->close(cur_indx->mdhim_store->db_handle, 
 								cur_indx->mdhim_store->db_stats)) 

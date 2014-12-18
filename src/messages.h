@@ -20,7 +20,7 @@ extern "C"
 //Delete multiple keys from the data store at once
 #define MDHIM_BULK_DEL 5
 //Close message
-#define MDHIM_CLOSE 6
+#define MDHIM_FINALIZE 6
 //Generic receive message
 #define MDHIM_RECV 7
 //Receive message for a get request
@@ -31,6 +31,8 @@ extern "C"
 #define MDHIM_COMMIT 10
 //Open message
 #define MDHIM_OPEN 11
+//Close message
+#define MDHIM_CLOSE 12
 
 /* Operations for getting a key/value */
 //Get the value for the specified key
@@ -148,6 +150,15 @@ struct mdhim_openm_t {
 	/* not using user/passwd etc for now. */
 };
 
+/* close database message */
+struct mdhim_closem_t {
+	mdhim_basem_t basem;
+	int db_type;
+	int db_key_type;
+	char db_path[MDHIM_PATH_MAX]; /* db_path+name */
+	/* not using user/passwd etc for now. */
+};
+
 /* Range server info message */
 struct mdhim_rsi_t {
 	//The range server number, which is a number 1 - N where N is the number of servers
@@ -190,6 +201,9 @@ int receive_all_client_responses(struct mdhim_t *md, int *srcs, int nsrcs,
 				 void ***messages);
 int pack_open_message(struct mdhim_t *md, struct mdhim_openm_t *om, void **sendbuf, int *sendsize);
 int unpack_open_message(struct mdhim_t *md, void *message, int mesg_size,  void **openm);
+
+int pack_close_message(struct mdhim_t *md, struct mdhim_closem_t *cm, void **sendbuf, int *sendsize);
+int unpack_close_message(struct mdhim_t *md, void *message, int mesg_size,  void **closem);
 
 int pack_put_message(struct mdhim_t *md, struct mdhim_putm_t *pm, void **sendbuf, int *sendsize);
 int pack_bput_message(struct mdhim_t *md, struct mdhim_bputm_t *bpm, void **sendbuf, int *sendsize);

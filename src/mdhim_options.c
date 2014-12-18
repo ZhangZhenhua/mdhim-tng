@@ -39,7 +39,6 @@ struct mdhim_options_t *mdhim_options_init()
         opts->max_recs_per_slice = 100000;
 	opts->db_paths = NULL;
 	opts->num_paths = 0;
-	opts->num_wthreads = 1;
 
 	set_manifest_path(opts, "./");
 	return opts;
@@ -170,13 +169,6 @@ void mdhim_options_set_server_factor(mdhim_options_t* opts, int server_factor)
 void mdhim_options_set_max_recs_per_slice(mdhim_options_t* opts, uint64_t max_recs_per_slice)
 {
 	opts->max_recs_per_slice = max_recs_per_slice;
-};
-
-void mdhim_options_set_num_worker_threads(mdhim_options_t* opts, int num_wthreads)
-{
-	if (num_wthreads > 0) {
-		opts->num_wthreads = num_wthreads;
-	}
 };
 
 void mdhim_options_destroy(mdhim_options_t *opts) {
