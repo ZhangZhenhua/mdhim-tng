@@ -157,256 +157,8 @@ int read_manifest(mdhim_db_t *mdb, struct index_t *index) {
 	return ret;
 }
 
-/**
- * update_stat
- * Adds or updates the given stat to the hash table
- *
- * @param md       pointer to the main MDHIM structure
- * @param key      pointer to the key we are examining
- * @param key_len  the key's length
- * @return MDHIM_SUCCESS or MDHIM_ERROR on error
- */
-int update_stat(struct mdhim_t *md, struct index_t *index, void *key, uint32_t key_len) {
-	int slice_num;
-	void *val1, *val2;
-	int float_type = 0;
-	struct mdhim_stat *os, *stat;
 
-	//Acquire the lock to update the stats
-	while (pthread_rwlock_wrlock(index->mdhim_store->mdhim_store_stats_lock) == EBUSY) {
-		usleep(10);
-	}
-
-	if ((float_type = is_float_key(index->key_type)) == 1) {
-		val1 = (void *) malloc(sizeof(long double));
-		val2 = (void *) malloc(sizeof(long double));
-	} else {
-		val1 = (void *) malloc(sizeof(uint64_t));
-		val2 = (void *) malloc(sizeof(uint64_t));
-	}
-
-	if (index->key_type == MDHIM_STRING_KEY) {
-		*(long double *)val1 = get_str_num(key, key_len);
-		*(long double *)val2 = *(long double *)val1;
-	} else if (index->key_type == MDHIM_FLOAT_KEY) {
-		*(long double *)val1 = *(float *) key;
-		*(long double *)val2 = *(float *) key;
-	} else if (index->key_type == MDHIM_DOUBLE_KEY) {
-		*(long double *)val1 = *(double *) key;
-		*(long double *)val2 = *(double *) key;
-	} else if (index->key_type == MDHIM_INT_KEY) {
-		*(uint64_t *)val1 = *(uint32_t *) key;
-		*(uint64_t *)val2 = *(uint32_t *) key;
-	} else if (index->key_type == MDHIM_LONG_INT_KEY) {
-		*(uint64_t *)val1 = *(uint64_t *) key;
-		*(uint64_t *)val2 = *(uint64_t *) key;
-	} else if (index->key_type == MDHIM_BYTE_KEY) {
-		*(long double *)val1 = get_byte_num(key, key_len);
-		*(long double *)val2 = *(long double *)val1;
-	} 
-
-	slice_num = get_slice_num(md, index, key, key_len);
-
-	HASH_FIND_INT(index->mdhim_store->mdhim_store_stats, &slice_num, os);
-
-	stat = malloc(sizeof(struct mdhim_stat));
-	stat->min = val1;
-	stat->max = val2;
-	stat->num = 1;
-	stat->key = slice_num;
-	stat->dirty = 1;
-
-	if (float_type && os) {
-		if (*(long double *)os->min > *(long double *)val1) {
-			free(os->min);
-			stat->min = val1;
-		} else {
-			free(val1);
-			stat->min = os->min;
-		}
-
-		if (*(long double *)os->max < *(long double *)val2) {
-			free(os->max);
-			stat->max = val2;
-		} else {
-			free(val2);
-			stat->max = os->max;
-		}
-	}
-	if (!float_type && os) {
-		if (*(uint64_t *)os->min > *(uint64_t *)val1) {
-			free(os->min);
-			stat->min = val1;
-		} else {
-			free(val1);
-			stat->min = os->min;
-		}
-
-		if (*(uint64_t *)os->max < *(uint64_t *)val2) {
-			free(os->max);
-			stat->max = val2;
-		} else {
-			free(val2);
-			stat->max = os->max;
-		}		
-	}
-
-	if (!os) {
-		HASH_ADD_INT(index->mdhim_store->mdhim_store_stats, key, stat);    
-	} else {	
-		stat->num = os->num + 1;
-		//Replace the existing stat
-		HASH_REPLACE_INT(index->mdhim_store->mdhim_store_stats, key, stat, os);  
-		free(os);
-	}
-
-	//Release the stats lock
-	pthread_rwlock_unlock(index->mdhim_store->mdhim_store_stats_lock);
-	return MDHIM_SUCCESS;
-}
-
-/**
- * load_stats
- * Loads the statistics from the database
- *
- * @param md  Pointer to the main MDHIM structure
- * @return MDHIM_SUCCESS or MDHIM_ERROR on error
- */
-int load_stats(mdhim_db_t *db, struct index_t *index) {
-	void **val;
-	int *val_len, *key_len;
-	int **slice;
-	int *old_slice;
-	struct mdhim_stat *stat;
-	int float_type = 0;
-	void *min, *max;
-	int done = 0;
-
-	float_type = is_float_key(index->key_type);
-	slice = malloc(sizeof(int *));
-	*slice = NULL;
-	key_len = malloc(sizeof(int));
-	*key_len = sizeof(int);
-	val = malloc(sizeof(struct mdhim_db_stat *));	
-	val_len = malloc(sizeof(int));
-	old_slice = NULL;
-	index->mdhim_store->mdhim_store_stats = NULL;
-	while (!done) {
-		//Check the db for the key/value
-		*val = NULL;
-		*val_len = 0;		
-		index->mdhim_store->get_next(index->mdhim_store->db_stats, 
-					     (void **) slice, key_len, (void **) val, 
-					     val_len);	
-		
-		//Add the stat to the hash table - the value is 0 if the key was not in the db
-		if (!*val || !*val_len) {
-			done = 1;
-			continue;
-		}
-
-		if (old_slice) {
-			free(old_slice);
-			old_slice = NULL;
-		}
-
-		mlog(MDHIM_SERVER_DBG, "Rank: %d - Loaded stat for slice: %d with " 
-		     "imin: %lu and imax: %lu, dmin: %Lf, dmax: %Lf, and num: %lu", 
-		     db->mdhim_rank, **slice, (*(struct mdhim_db_stat **)val)->imin, 
-		     (*(struct mdhim_db_stat **)val)->imax, (*(struct mdhim_db_stat **)val)->dmin, 
-		     (*(struct mdhim_db_stat **)val)->dmax, (*(struct mdhim_db_stat **)val)->num);
-	
-		stat = malloc(sizeof(struct mdhim_stat));
-		if (float_type) {
-			min = (void *) malloc(sizeof(long double));
-			max = (void *) malloc(sizeof(long double));
-			*(long double *)min = (*(struct mdhim_db_stat **)val)->dmin;
-			*(long double *)max = (*(struct mdhim_db_stat **)val)->dmax;
-		} else {
-			min = (void *) malloc(sizeof(uint64_t));
-			max = (void *) malloc(sizeof(uint64_t));
-			*(uint64_t *)min = (*(struct mdhim_db_stat **)val)->imin;
-			*(uint64_t *)max = (*(struct mdhim_db_stat **)val)->imax;
-		}
-
-		stat->min = min;
-		stat->max = max;
-		stat->num = (*(struct mdhim_db_stat **)val)->num;
-		stat->key = **slice;
-		stat->dirty = 0;
-		old_slice = *slice;
-		HASH_ADD_INT(index->mdhim_store->mdhim_store_stats, key, stat); 
-		free(*val);
-	}
-
-	if (old_slice) {
-		free(old_slice);
-	}
-	free(val);
-	free(val_len);
-	free(key_len);
-	free(*slice);
-	free(slice);
-	return MDHIM_SUCCESS;
-}
-
-/**
- * write_stats
- * Writes the statistics stored in a hash table to the database
- * This is done on mdhim_close
- *
- * @param md  Pointer to the main MDHIM structure
- * @return MDHIM_SUCCESS or MDHIM_ERROR on error
- */
-int write_stats(struct mdhim_t *md, struct index_t *bi) {
-	struct mdhim_stat *stat, *tmp;
-	struct mdhim_db_stat *dbstat;
-	int float_type = 0;
-
-	float_type = is_float_key(bi->key_type);
-
-	//Iterate through the stat hash entries
-	HASH_ITER(hh, bi->mdhim_store->mdhim_store_stats, stat, tmp) {	
-		if (!stat) {
-			continue;
-		}
-
-		if (!stat->dirty) {
-			goto free_stat;
-		}
-
-		dbstat = malloc(sizeof(struct mdhim_db_stat));
-		if (float_type) {
-			dbstat->dmax = *(long double *)stat->max;
-			dbstat->dmin = *(long double *)stat->min;
-			dbstat->imax = 0;
-			dbstat->imin = 0;
-		} else {
-			dbstat->imax = *(uint64_t *)stat->max;
-			dbstat->imin = *(uint64_t *)stat->min;
-			dbstat->dmax = 0;
-			dbstat->dmin = 0;
-		}
-
-		dbstat->slice = stat->key;
-		dbstat->num = stat->num;
-		//Write the key to the database		
-		bi->mdhim_store->put(bi->mdhim_store->db_stats, 
-				     &dbstat->slice, sizeof(int), dbstat, 
-				     sizeof(struct mdhim_db_stat));	
-		//Delete and free hash entry
-		free(dbstat);
-
-	free_stat:
-		HASH_DEL(bi->mdhim_store->mdhim_store_stats, stat); 
-		free(stat->max);
-		free(stat->min);
-		free(stat);
-	}
-
-	return MDHIM_SUCCESS;
-}
-
+#if 0
 /** 
  * open_db_store
  * Opens the database for the given idenx
@@ -468,6 +220,7 @@ int open_db_store(mdhim_db_t *db, struct index_t *index) {
 
 	return MDHIM_SUCCESS;
 }
+#endif
 
 /**
  * get_num_range_servers
@@ -918,13 +671,13 @@ void indexes_release(mdhim_db_t *md) {
 				mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error closing database", 
 				     md->mdhim_rank);
 			}
-#endif
 			pthread_rwlock_destroy(cur_indx->mdhim_store->mdhim_store_stats_lock);
 			free(cur_indx->mdhim_store->mdhim_store_stats_lock);
+			free(cur_indx->mdhim_store);
+#endif
 			if (cur_indx->type != LOCAL_INDEX) {
 				MPI_Comm_free(&cur_indx->rs_comm);
 			}
-			free(cur_indx->mdhim_store);
 		}
 	
 		

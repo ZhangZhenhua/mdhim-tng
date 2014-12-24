@@ -86,9 +86,6 @@ typedef struct index_manifest_t {
 } index_manifest_t;
 
 struct mdhim_db;
-int update_stat(struct mdhim_t *md, struct index_t *bi, void *key, uint32_t key_len);
-int load_stats(struct mdhim_t *md, struct index_t *bi);
-int write_stats(struct mdhim_t *md, struct index_t *bi);
 int open_db_store(struct mdhim_t *md, struct index_t *index);
 uint32_t get_num_range_servers(int rserver_factor);
 struct index_t *create_local_index(struct mdhim_t *md, int db_type, int key_type);

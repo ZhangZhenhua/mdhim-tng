@@ -38,8 +38,9 @@ struct mdhim_rm_t *_open_db(struct mdhim_db *db) {
 		openmsg->db_create_new = opts->db_create_new;
 		openmsg->db_value_append = opts->db_value_append;
 		openmsg->debug_level = opts->debug_level;
+		openmsg->max_recs_per_slice = opts->max_recs_per_slice;
 		memset(openmsg->db_path, '\0', MDHIM_PATH_MAX);
-		sprintf(openmsg->db_path, "%s/%s", opts->db_path, opts->db_name);
+		sprintf(openmsg->db_path, "%s/%s", opts->db_path,opts->db_name);
 		openmsg_list[j++] = openmsg;
 	}
 

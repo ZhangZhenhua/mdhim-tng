@@ -166,8 +166,8 @@ void _add_to_rangesrv_list(rangesrv_list **list, rangesrv_info *ri) {
  *
  * @return        MDHIM_ERROR if the key is not valid, otherwise the MDHIM_SUCCESS
  */
-int verify_key(struct index_t *index, void *key, 
-	       int key_len, int key_type) {
+int verify_key(uint64_t max_recs_per_slice, int key_type,
+	       void *key, int key_len) {
 	int i;
 	int id;
 	struct mdhim_char *mc;
@@ -206,7 +206,7 @@ int verify_key(struct index_t *index, void *key,
 		ikey = *(double *)key;
 	}
 
-	size_check = ikey/index->mdhim_max_recs_per_slice;
+	size_check = ikey/max_recs_per_slice;
 	if (size_check >= MDHIM_MAX_SLICES) {
 		mlog(MDHIM_CLIENT_CRIT, "Error - Not enough slices for this key." 
 		     "  Try increasing the slice size.");
@@ -242,12 +242,11 @@ int is_float_key(int type) {
  * gets the slice number from a key
  * slice is a portion of the range served by MDHIM
  * each range server servers many slices of the range
- * @param md        main MDHIM struct
  * @param key       pointer to the key to find the range server of
  * @param key_len   length of the key
  * @return the slice number or 0 on error
  */
-int get_slice_num(struct mdhim_t *md, struct index_t *index, void *key, int key_len) {
+int get_slice_num(uint64_t max_recs_per_slice, int key_type, void *key, int key_len) {
 	//The number that maps a key to range server (dependent on key type)
 	int slice_num;
 	uint64_t key_num;
@@ -257,15 +256,14 @@ int get_slice_num(struct mdhim_t *md, struct index_t *index, void *key, int key_
 	int ret;
 	long double map_num;
 	uint64_t total_keys;
-	int key_type = index->key_type;
 
 	//The last key number that can be represented by the number of slices and the slice size
-	total_keys = MDHIM_MAX_SLICES *  index->mdhim_max_recs_per_slice;
+	total_keys = MDHIM_MAX_SLICES *  max_recs_per_slice;
 
 	//Make sure this key is valid
-	if ((ret = verify_key(index, key, key_len, key_type)) != MDHIM_SUCCESS) {
+	if ((ret = verify_key(max_recs_per_slice, key_type, key, key_len)) != MDHIM_SUCCESS) {
 		mlog(MDHIM_CLIENT_INFO, "Rank: %d - Invalid key given", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return MDHIM_ERROR;
 	}
 
@@ -345,7 +343,7 @@ int get_slice_num(struct mdhim_t *md, struct index_t *index, void *key, int key_
 
 
 	/* Convert the key to a slice number  */
-	slice_num = key_num/index->mdhim_max_recs_per_slice;
+	slice_num = key_num/max_recs_per_slice;
 
 	//Return the slice number
 	return slice_num;
@@ -355,11 +353,10 @@ int get_slice_num(struct mdhim_t *md, struct index_t *index, void *key, int key_
  * get_range_server_by_slice
  *
  * gets the range server that handles the key given
- * @param md        main MDHIM struct
  * @param slice     the slice number
  * @return the rank of the range server or NULL on error
  */
-rangesrv_info *get_range_server_by_slice(struct mdhim_t *md, struct index_t *index, int slice) {
+rangesrv_info *get_range_server_by_slice(struct index_t *index, int slice) {
 	//The number that maps a key to range server (dependent on key type)
 	uint32_t rangesrv_num;
 	//The range server number that we return
@@ -384,12 +381,12 @@ rangesrv_info *get_range_server_by_slice(struct mdhim_t *md, struct index_t *ind
  * get_range_servers
  *
  * gets the range server that handles the key given
- * @param md        main MDHIM struct
+ * @param mdb       MDHIM database struct
  * @param key       pointer to the key to find the range server of
  * @param key_len   length of the key
  * @return the rank of the range server or NULL on error
  */
-rangesrv_list *get_range_servers(struct mdhim_t *md, struct index_t *index, 
+rangesrv_list *get_range_servers(mdhim_db_t *mdb, struct index_t *index,
 				 void *key, int key_len) {
 	//The number that maps a key to range server (dependent on key type)
 	int slice_num;
@@ -397,11 +394,13 @@ rangesrv_list *get_range_servers(struct mdhim_t *md, struct index_t *index,
 	rangesrv_info *ret_rp;
 	rangesrv_list *rl;
 
-	if ((slice_num = get_slice_num(md, index, key, key_len)) == MDHIM_ERROR) {
+	if ((slice_num = get_slice_num(index->mdhim_max_recs_per_slice,
+				       index->key_type, key, key_len))
+			== MDHIM_ERROR) {
 		return NULL;
 	}
 
-	ret_rp = get_range_server_by_slice(md, index, slice_num);       
+	ret_rp = get_range_server_by_slice(index, slice_num);
 	rl = NULL;
 	_add_to_rangesrv_list(&rl, ret_rp);
 
@@ -842,7 +841,8 @@ rangesrv_list *get_range_servers_from_stats(struct mdhim_t *md, struct index_t *
 
 		//Get the current slice number of our key
 		if (key && key_len) {
-			cur_slice = get_slice_num(md, index, key, key_len);
+			cur_slice = get_slice_num(index->mdhim_max_recs_per_slice,
+						  index->key_type, key, key_len);
 			if (cur_slice == MDHIM_ERROR) {
 				mlog(MDHIM_CLIENT_CRIT, "Rank: %d - Error: could not determine a" 
 				     " valid a slice number", 
@@ -864,7 +864,7 @@ rangesrv_list *get_range_servers_from_stats(struct mdhim_t *md, struct index_t *
 			return NULL;
 		}
 
-		ret_rp = get_range_server_by_slice(md, index, slice_num);
+		ret_rp = get_range_server_by_slice(index, slice_num);
 		if (!ret_rp) {
 			mlog(MDHIM_CLIENT_INFO, "Rank: %d - Did not get a valid range server from" 
 			     " get_range_server_by_size", 

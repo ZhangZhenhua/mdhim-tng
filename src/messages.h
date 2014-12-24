@@ -146,6 +146,7 @@ struct mdhim_openm_t {
 	int db_create_new;
 	int db_value_append;
 	int debug_level;
+	uint64_t max_recs_per_slice;
 	char db_path[MDHIM_PATH_MAX]; /* db_path+name */
 	/* not using user/passwd etc for now. */
 };
