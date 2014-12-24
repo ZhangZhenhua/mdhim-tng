@@ -36,8 +36,6 @@ struct rangesrv_info {
  */
 struct index_t {
 	int id;
-	//The abstracted data store layer that mdhim uses to store and retrieve records
-	struct mdhim_store_t *mdhim_store;
 	//Options for the mdhim data store
 	int key_type;             //The key type used in the db
 	int db_type;              //The database type

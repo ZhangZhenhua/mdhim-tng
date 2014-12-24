@@ -102,10 +102,10 @@ struct secondary_bulk_info {
 
 extern struct mdhim_t mdhim_gdata;
 
-struct mdhim_t *mdhimInit(void *appComm);
+struct mdhim_t *mdhimInit(void *appComm, int num_wthreads);
 int mdhimFinalize();
-struct mdhimdb_t *mdhimOpen(struct mdhim_options_t *opts);
-int mdhimClose(struct mdhim_t *md);
+mdhim_db_t *mdhimOpen(struct mdhim_options_t *opts);
+int mdhimClose(mdhim_db_t *mdb);
 int mdhimCommit(struct mdhim_t *md, struct index_t *index);
 int mdhimStatFlush(struct mdhim_t *md, struct index_t *index);
 struct mdhim_brm_t *mdhimPut(struct mdhim_t *md,

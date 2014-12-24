@@ -246,23 +246,29 @@ mdhim_db_t* mdhimOpen(struct mdhim_options_t *ops) {
 	}
 	db->primary_index = primary_index;
 
-	ret = get_rangesrvs(db, db->primary_index);
-	if (ret != MDHIM_SUCCESS) {
-		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
-		     "Couldn't get range servers.",
-		     mdhim_gdata.mdhim_rank);
-		return NULL;
-	}
-
 	rm = _open_db(db);
 	if (rm != NULL && rm->error != MDHIM_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
 		     "Couldn't open physical database",
 		     mdhim_gdata.mdhim_rank);
+		ret = MDHIM_ERROR;
+		free(db);
+		db = NULL;
+	} else {
+		ret = write_manifest(db);
+		if (ret != MDHIM_SUCCESS) {
+			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
+				"Couldn't open physical database",
+				mdhim_gdata.mdhim_rank);
+		}
+	}
+
+	mdhim_full_release_msg(rm);
+	if (ret != MDHIM_SUCCESS) {
+		indexes_release(db);
 		free(db);
 		db = NULL;
 	}
-	mdhim_full_release_msg(rm);
 
 	return db;
 }

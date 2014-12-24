@@ -31,19 +31,19 @@ int im_range_server(struct index_t *index) {
  * open_manifest
  * Opens the manifest file
  *
- * @param md       Pointer to the main MDHIM structure
+ * @param mdb      Pointer to the MDHIM database structure
  * @param flags    Flags to open the file with
  */
-int open_manifest(mdhim_db_t *db, struct index_t *index, int flags) {
+int open_manifest(mdhim_db_t *mdb, struct index_t *index, int flags) {
 	int fd;	
 	char path[PATH_MAX];
 
-	sprintf(path, "%s%d_%d_%d", db->db_opts->manifest_path, index->type, 
-		index->id, db->mdhim_rank);
+	sprintf(path, "%s%d_%d_%d", mdb->db_opts->manifest_path, index->type, 
+		index->id, mdb->mdhim_rank);
 	fd = open(path, flags, 00600);
 	if (fd < 0) {
 		mlog(MDHIM_SERVER_DBG, "Rank: %d - Error opening manifest file", 
-		     db->mdhim_rank);
+		     mdb->mdhim_rank);
 	}
 	
 	return fd;
@@ -55,102 +55,104 @@ int open_manifest(mdhim_db_t *db, struct index_t *index, int flags) {
  *
  * @param md       Pointer to the main MDHIM structure
  */
-void write_manifest(struct mdhim_t *md, struct index_t *index) {
+int write_manifest(mdhim_db_t *mdb) {
+	struct index_t *index;
 	index_manifest_t manifest;
 	int fd;
-	int ret;
+	int ret = 0;
 
-	//Range server with range server number 1, for the primary index, is in charge of the manifest
-	if (index->type != LOCAL_INDEX && 
-	    (index->myinfo.rangesrv_num != 1)) {	
-		return;
-	} 
-
-	if ((fd = open_manifest(md, index, O_RDWR | O_CREAT | O_TRUNC)) < 0) {
-		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error opening manifest file", 
-		     md->mdhim_rank);
-		return;
+	index = mdb->primary_index;
+	if ((fd = open_manifest(mdb, index, O_RDWR | O_CREAT | O_EXCL)) < 0) {
+		mlog(MDHIM_SERVER_INFO, "Rank: %d - manifest file existed",
+		     mdb->mdhim_rank);
+		/* TODO note, if mainfest creator create the file but not
+		 * yet finish writing to it, and another reader comes in,
+		 * then it's a race.
+		 */
+		return read_manifest(mdb, index);
 	}
-	
+
 	//Populate the manifest structure
 	manifest.num_rangesrvs = index->num_rangesrvs;
 	manifest.key_type = index->key_type;
 	manifest.db_type = index->db_type;
 	manifest.rangesrv_factor = index->range_server_factor;
 	manifest.slice_size = index->mdhim_max_recs_per_slice;
-	manifest.num_nodes = md->mdhim_comm_size;       
-	
+	manifest.num_nodes = mdb->mdhim_comm_size;
+
 	if ((ret = write(fd, &manifest, sizeof(manifest))) < 0) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error writing manifest file", 
-		     md->mdhim_rank);
+		     mdb->mdhim_rank);
+		return MDHIM_ERROR;
 	}
 
 	close(fd);
+	return MDHIM_SUCCESS;
 }
 
 /**
  * read_manifest
  * Reads in and validates the manifest file
  *
- * @param md       Pointer to the main MDHIM structure
+ * @param mdb      Pointer to the MDHIM database structure
  * @return MDHIM_SUCCESS or MDHIM_ERROR on error
  */
-int read_manifest(mdhim_db_t *db, struct index_t *index) {
+int read_manifest(mdhim_db_t *mdb, struct index_t *index) {
 	int fd;
 	int ret;
 	index_manifest_t manifest;
 
-	if ((fd = open_manifest(db, index, O_RDWR)) < 0) {
-		mlog(MDHIM_SERVER_DBG, "Rank: %d - Couldn't open manifest file", 
-		     db->mdhim_rank);
+	if ((fd = open_manifest(mdb, index, O_RDWR)) < 0) {
+		mlog(MDHIM_SERVER_DBG, "Rank: %d - Couldn't open manifest file",
+		     mdb->mdhim_rank);
 		return MDHIM_SUCCESS;
 	}
 
 	if ((ret = read(fd, &manifest, sizeof(manifest))) < 0) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Couldn't read manifest file", 
-		     db->mdhim_rank);
+		     mdb->mdhim_rank);
 		return MDHIM_ERROR;
 	}
 
-	ret = MDHIM_SUCCESS;	
+	ret = MDHIM_SUCCESS;
 	mlog(MDHIM_SERVER_DBG, "Rank: %d - Manifest contents - \nnum_rangesrvs: %d, key_type: %d, " 
-	     "db_type: %d, rs_factor: %u, slice_size: %lu, num_nodes: %d", 
-	     db->mdhim_rank, manifest.num_rangesrvs, manifest.key_type, manifest.db_type, 
+	     "db_type: %d, rs_factor: %u, slice_size: %lu, num_nodes: %d",
+	     mdb->mdhim_rank, manifest.num_rangesrvs, manifest.key_type, manifest.db_type, 
 	     manifest.rangesrv_factor, manifest.slice_size, manifest.num_nodes);
-	
+
 	//Check that the manifest and the current config match
 	if (manifest.key_type != index->key_type) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - The key type in the manifest file" 
-		     " doesn't match the current key type", 
-		     db->mdhim_rank);
+		     " doesn't match the current key type",
+		     mdb->mdhim_rank);
 		ret = MDHIM_ERROR;
 	}
 	if (manifest.db_type != index->db_type) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - The database type in the manifest file" 
-		     " doesn't match the current database type", 
-		     db->mdhim_rank);
+		     " doesn't match the current database type",
+		     mdb->mdhim_rank);
 		ret = MDHIM_ERROR;
 	}
 
 	if (manifest.rangesrv_factor != index->range_server_factor) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - The range server factor in the manifest file" 
-		     " doesn't match the current range server factor", 
-		     db->mdhim_rank);
+		     " doesn't match the current range server factor",
+		     mdb->mdhim_rank);
 		ret = MDHIM_ERROR;
 	}
 	if (manifest.slice_size != index->mdhim_max_recs_per_slice) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - The slice size in the manifest file" 
-		     " doesn't match the current slice size", 
-		     db->mdhim_rank);
+		     " doesn't match the current slice size",
+		     mdb->mdhim_rank);
 		ret = MDHIM_ERROR;
 	}
-	if (manifest.num_nodes != db->mdhim_comm_size) {
+	if (manifest.num_nodes != mdb->mdhim_comm_size) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - The number of nodes in this MDHIM instance" 
-		     " doesn't match the number used previously", 
-		     db->mdhim_rank);
+		     " doesn't match the number used previously",
+		     mdb->mdhim_rank);
 		ret = MDHIM_ERROR;
 	}
-	
+
 	close(fd);
 	return ret;
 }
@@ -622,7 +624,6 @@ done:
  * @param max_recs_per_slice the number of records per slice
  * @return                   MDHIM_ERROR on error, otherwise the index identifier
  */
-
 struct index_t *create_global_index(mdhim_db_t *db, int server_factor, 
 				    uint64_t max_recs_per_slice, 
 				    int db_type, int key_type) {
