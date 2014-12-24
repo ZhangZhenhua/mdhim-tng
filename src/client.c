@@ -164,9 +164,10 @@ struct mdhim_brm_t *client_close(struct mdhim_closem_t **closemsg_list,
  * @param pm pointer to put message to be sent or inserted into the range server's work queue
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_rm_t *client_put(struct mdhim_t *md, struct mdhim_putm_t *pm) {
+struct mdhim_rm_t *client_put(struct mdhim_putm_t *pm) {
 
 	int return_code;
+	struct mdhim_t *md = &mdhim_gdata;
 	struct mdhim_rm_t *rm;       
 
 	return_code = send_rangesrv_work(md, pm->basem.server_rank, pm);
@@ -196,11 +197,12 @@ struct mdhim_rm_t *client_put(struct mdhim_t *md, struct mdhim_putm_t *pm) {
  * @param bpm_list double pointer to an array of bulk put messages
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_brm_t *client_bput(struct mdhim_t *md, struct index_t *index, 
+struct mdhim_brm_t *client_bput(struct index_t *index,
 				struct mdhim_bputm_t **bpm_list) {
 	int return_code;
 	struct mdhim_brm_t *brm_head, *brm_tail, *brm;
 	struct mdhim_rm_t **rm_list, *rm;
+	struct mdhim_t *md = &mdhim_gdata;
 	int i;
 	int *srvs;
 	int num_srvs;

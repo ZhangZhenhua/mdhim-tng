@@ -347,7 +347,7 @@ int mdhimCommit(struct mdhim_t *md, struct index_t *index) {
                              inserting secondary global and local keys
  * @return                   mdhim_brm_t * or NULL on error
  */
-struct mdhim_brm_t *mdhimPut(struct mdhim_t *md,
+struct mdhim_brm_t *mdhimPut(struct mdhim_db *mdb,
 			     /*Primary key */
 			     void *primary_key, int primary_key_len,  
 			     void *value, int value_len,
@@ -371,7 +371,7 @@ struct mdhim_brm_t *mdhimPut(struct mdhim_t *md,
 		return NULL;
 	}
 
-	rm = _put_record(md, md->primary_index, primary_key, primary_key_len, value, value_len);
+	rm = _put_record(mdb, mdb->primary_index, primary_key, primary_key_len, value, value_len);
 	if (!rm || rm->error) {
 		return head;
 	}
@@ -391,7 +391,7 @@ struct mdhim_brm_t *mdhimPut(struct mdhim_t *md,
 			primary_key_lens[i] = primary_key_len;
 		}
 
-		brm = _bput_records(md, secondary_local_info->secondary_index, 
+		brm = _bput_records(mdb, secondary_local_info->secondary_index, 
 				    secondary_local_info->secondary_keys, 
 				    secondary_local_info->secondary_key_lens, 
 				    primary_keys, primary_key_lens, 
@@ -417,7 +417,7 @@ struct mdhim_brm_t *mdhimPut(struct mdhim_t *md,
 			primary_keys[i] = primary_key;
 			primary_key_lens[i] = primary_key_len;
 		}
-		brm = _bput_records(md, secondary_global_info->secondary_index, 
+		brm = _bput_records(mdb, secondary_global_info->secondary_index, 
 				    secondary_global_info->secondary_keys, 
 				    secondary_global_info->secondary_key_lens, 
 				    primary_keys, primary_key_lens,
@@ -445,7 +445,7 @@ struct mdhim_brm_t *mdhimPut(struct mdhim_t *md,
  * @param primary_key_len the length of the value
  * @return mdhim_brm_t * or NULL on error
  */
-struct mdhim_brm_t *mdhimPutSecondary(struct mdhim_t *md, 
+struct mdhim_brm_t *mdhimPutSecondary(struct mdhim_db *mdb, 
 				      struct index_t *secondary_index,
 				      /*Secondary key */
 				      void *secondary_key, int secondary_key_len,  
@@ -465,7 +465,7 @@ struct mdhim_brm_t *mdhimPutSecondary(struct mdhim_t *md,
 		return NULL;
 	}
 
-	rm = _put_record(md, secondary_index, secondary_key, secondary_key_len, 
+	rm = _put_record(mdb, secondary_index, secondary_key, secondary_key_len, 
 			 primary_key, primary_key_len);
 	if (!rm || rm->error) {
 		return head;
@@ -527,7 +527,7 @@ struct mdhim_brm_t *_bput_secondary_keys_from_info(struct mdhim_t *md,
  * @param num_records  the number of records to store (i.e., the number of keys in keys array)
  * @return mdhim_brm_t * or NULL on error
  */
-struct mdhim_brm_t *mdhimBPut(struct mdhim_t *md, 
+struct mdhim_brm_t *mdhimBPut(struct mdhim_t *mdb, 
 			      void **primary_keys, int *primary_key_lens, 
 			      void **primary_values, int *primary_value_lens, 
 			      int num_records,
@@ -541,7 +541,7 @@ struct mdhim_brm_t *mdhimBPut(struct mdhim_t *md,
 		return NULL;
 	}
 
-	head = _bput_records(md, md->primary_index, primary_keys, primary_key_lens, 
+	head = _bput_records(mdb, mdb->primary_index, primary_keys, primary_key_lens, 
 			     primary_values, primary_value_lens, num_records);
 	if (!head || head->error) {
 		return head;
@@ -551,7 +551,7 @@ struct mdhim_brm_t *mdhimBPut(struct mdhim_t *md,
 	if (secondary_local_info && secondary_local_info->secondary_index && 
 	    secondary_local_info->secondary_keys && 
 	    secondary_local_info->secondary_key_lens) {
-		new = _bput_secondary_keys_from_info(md, secondary_local_info, primary_keys, 
+		new = _bput_secondary_keys_from_info(mdb, secondary_local_info, primary_keys, 
 						     primary_key_lens, num_records);
 		if (new) {
 			_concat_brm(head, new);
@@ -562,7 +562,7 @@ struct mdhim_brm_t *mdhimBPut(struct mdhim_t *md,
 	if (secondary_global_info && secondary_global_info->secondary_index && 
 	    secondary_global_info->secondary_keys && 
 	    secondary_global_info->secondary_key_lens) {
-		new = _bput_secondary_keys_from_info(md, secondary_global_info, primary_keys, 
+		new = _bput_secondary_keys_from_info(mdb, secondary_global_info, primary_keys, 
 						     primary_key_lens, num_records);
 		if (new) {
 			_concat_brm(head, new);
@@ -584,7 +584,7 @@ struct mdhim_brm_t *mdhimBPut(struct mdhim_t *md,
  * @param num_records  the number of records to store (i.e., the number of keys in keys array)
  * @return mdhim_brm_t * or NULL on error
  */
-struct mdhim_brm_t *mdhimBPutSecondary(struct mdhim_t *md, struct index_t *secondary_index,
+struct mdhim_brm_t *mdhimBPutSecondary(struct mdhim_db *mdb, struct index_t *secondary_index,
 				       void **secondary_keys, int *secondary_key_lens, 
 				       void **primary_keys, int *primary_key_lens, 
 				       int num_records) {
@@ -596,7 +596,7 @@ struct mdhim_brm_t *mdhimBPutSecondary(struct mdhim_t *md, struct index_t *secon
 		return NULL;
 	}
 
-	head = _bput_records(md, secondary_index, secondary_keys, secondary_key_lens, 
+	head = _bput_records(mdb, secondary_index, secondary_keys, secondary_key_lens, 
 			     primary_keys, primary_key_lens, num_records);
 	if (!head || head->error) {
 		return head;

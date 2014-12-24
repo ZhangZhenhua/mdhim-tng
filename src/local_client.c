@@ -44,8 +44,9 @@ static void *get_msg_self(struct mdhim_t *md) {
  * @param pm pointer to put message to be sent or inserted into the range server's work queue
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_rm_t *local_client_put(struct mdhim_t *md, struct mdhim_putm_t *pm) {
+struct mdhim_rm_t *local_client_put(struct mdhim_putm_t *pm) {
 	int ret;
+	struct mdhim_t *md = &mdhim_gdata;
 	struct mdhim_rm_t *rm;
 	work_item *item;
 
@@ -75,8 +76,9 @@ struct mdhim_rm_t *local_client_put(struct mdhim_t *md, struct mdhim_putm_t *pm)
  * @param bpm pointer to bulk put message to be sent or inserted into the range server's work queue
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
 */
-struct mdhim_rm_t *local_client_bput(struct mdhim_t *md, struct mdhim_bputm_t *bpm) {
+struct mdhim_rm_t *local_client_bput(struct mdhim_bputm_t *bpm) {
 	int ret;
+	struct mdhim_t *md = &mdhim_gdata;
 	struct mdhim_rm_t *brm;
 	work_item *item;
         

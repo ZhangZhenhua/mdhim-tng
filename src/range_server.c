@@ -541,7 +541,7 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 	struct mdhim_store_t *mdhim_store = NULL;
 	mdhim_open_db_t *opendb = NULL;
 
-	opendb = _find_opendb_inc_ref(om->db_path);
+	opendb = _find_opendb_inc_ref(om->basem.db_path);
 	if (opendb != NULL) {
 		goto out;
 	}
@@ -558,7 +558,7 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 	mdhim_store = mdhim_db_init(om->db_type);
 
 	ret = mdhim_store->open(&mdhim_store->db_handle, &mdhim_store->db_stats,
-				om->db_path, flags, om->db_key_type,
+				om->basem.db_path, flags, om->db_key_type,
 				NULL /* letting opts = NULL*/);
 	if (ret != 0) {
 		mlog(MDHIM_SERVER_CRIT, "MDHIM Rank %d: Error while opening "
@@ -575,7 +575,7 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 	opendb->db_value_append = om->db_value_append;
 	opendb->debug_level = om->debug_level;
 	opendb->max_recs_per_slice = om->max_recs_per_slice;
-	strcpy(opendb->db_path, om->db_path);
+	strcpy(opendb->db_path, om->basem.db_path);
 	opendb->mdhim_store = mdhim_store;
 
 	_add_opendb(opendb);
@@ -610,7 +610,7 @@ int range_server_close(struct mdhim_t *md, struct mdhim_closem_t *cm, int source
 	struct mdhim_store_t *mdhim_store = NULL;
 	mdhim_open_db_t *opendb = NULL;
 
-	opendb = _find_opendb_dec_ref(cm->db_path);
+	opendb = _find_opendb_dec_ref(cm->basem.db_path);
 	if (opendb == NULL) {
 		/* return error??? */
 		goto out;
@@ -669,7 +669,9 @@ int range_server_put(struct mdhim_t *md, struct mdhim_putm_t *im, int source) {
 	int32_t old_value_len;
 	struct timeval start, end;
 	int inserted = 0;
-	struct index_t *index;
+	int db_value_append;
+	//struct index_t *index;
+	mdhim_open_db_t *opendb = NULL;
 
 	value = malloc(sizeof(void *));
 	*value = NULL;
@@ -677,13 +679,14 @@ int range_server_put(struct mdhim_t *md, struct mdhim_putm_t *im, int source) {
 	*value_len = 0;
 
 	//Get the index referenced the message
-	index = find_index(md, (struct mdhim_basem_t *) im);
-	if (!index) {
-		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving index for id: %d", 
-		     md->mdhim_rank, im->basem.index);
+	opendb = _find_opendb_inc_ref(im->basem.db_path);
+	if (!opendb) {
+		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving open db: %s", 
+		     mdhim_gdata.mdhim_rank, im->basem.db_path);
 		error = MDHIM_ERROR;
 		goto done;
 	}
+	db_value_append = opendb->db_value_append;
 
 	gettimeofday(&start, NULL);
        //Check for the key's existence
@@ -697,7 +700,7 @@ int range_server_put(struct mdhim_t *md, struct mdhim_putm_t *im, int source) {
 	}
 
         //If the option to append was specified and there is old data, concat the old and new
-	if (exists &&  md->db_opts->db_value_append == MDHIM_DB_APPEND) {
+	if (exists && db_value_append == MDHIM_DB_APPEND) {
 		old_value = *value;
 		old_value_len = *value_len;
 		new_value_len = old_value_len + im->value_len;
@@ -715,23 +718,24 @@ int range_server_put(struct mdhim_t *md, struct mdhim_putm_t *im, int source) {
 	free(value);
 	free(value_len);
         //Put the record in the database
-	if ((ret = 
-	     index->mdhim_store->put(index->mdhim_store->db_handle, 
-				     im->key, im->key_len, new_value, 
+	if ((ret =
+	     opendb->mdhim_store->put(opendb->mdhim_store->db_handle,
+				     im->key, im->key_len, new_value,
 				     new_value_len)) != MDHIM_SUCCESS) {
-		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error putting record", 
-		     md->mdhim_rank);	
+		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error putting record",
+		     mdhim_gdata.mdhim_rank);
 		error = ret;
 	} else {
 		inserted = 1;
 	}
 
 	if (!exists && error == MDHIM_SUCCESS) {
-		update_stat(md, index, im->key, im->key_len);
+		update_stat(opendb, im->key, im->key_len);
 	}
+	_find_opendb_dec_ref(im->basem.db_path);
 
 	gettimeofday(&end, NULL);
-	add_timing(start, end, inserted, md, MDHIM_PUT);
+	add_timing(start, end, inserted, &mdhim_gdata, MDHIM_PUT);
 
 done:
 	//Create the response message
@@ -744,13 +748,13 @@ done:
 	rm->basem.server_rank = md->mdhim_rank;
 	
 	//Send response
-	ret = send_locally_or_remote(md, source, rm);
+	ret = send_locally_or_remote(&mdhim_gdata, source, rm);
 
 	//Free memory
-	if (exists && md->db_opts->db_value_append == MDHIM_DB_APPEND) {
+	if (exists && db_value_append == MDHIM_DB_APPEND) {
 		free(new_value);
 	}
-	if (source != md->mdhim_rank) {
+	if (source != mdhim_gdata.mdhim_rank) {
 		free(im->key);
 		free(im->value);
 	} 
@@ -785,7 +789,9 @@ int range_server_bput(struct mdhim_t *md, struct mdhim_bputm_t *bim, int source)
 	int32_t old_value_len;
 	struct timeval start, end;
 	int num_put = 0;
-	struct index_t *index;
+	int db_value_append;
+	//struct index_t *index;
+	mdhim_open_db_t *opendb = NULL;
 
 	gettimeofday(&start, NULL);
 	exists = malloc(bim->num_keys * sizeof(int));
@@ -795,13 +801,14 @@ int range_server_bput(struct mdhim_t *md, struct mdhim_bputm_t *bim, int source)
 	value_len = malloc(sizeof(int32_t));
 
 	//Get the index referenced the message
-	index = find_index(md, (struct mdhim_basem_t *) bim);
-	if (!index) {
-		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving index for id: %d", 
-		     md->mdhim_rank, bim->basem.index);
+	opendb = _find_opendb_inc_ref(bim->basem.db_path);
+	if (!opendb) {
+		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for: %s", 
+		     md->mdhim_rank, bim->basem.db_path);
 		error = MDHIM_ERROR;
 		goto done;
 	}
+	db_value_append = opendb->db_value_append;
 
 	//Iterate through the arrays and insert each record
 	for (i = 0; i < bim->num_keys && i < MAX_BULK_OPS; i++) {	
@@ -809,7 +816,7 @@ int range_server_bput(struct mdhim_t *md, struct mdhim_bputm_t *bim, int source)
 		*value_len = 0;
 
                 //Check for the key's existence
-		index->mdhim_store->get(index->mdhim_store->db_handle, 
+		opendb->mdhim_store->get(opendb->mdhim_store->db_handle, 
 					       bim->keys[i], bim->key_lens[i], value, 
 					       value_len);
 		//The key already exists
@@ -820,7 +827,7 @@ int range_server_bput(struct mdhim_t *md, struct mdhim_bputm_t *bim, int source)
 		}
 
 		//If the option to append was specified and there is old data, concat the old and new
-		if (exists[i] && md->db_opts->db_value_append == MDHIM_DB_APPEND) {
+		if (exists[i] && db_value_append == MDHIM_DB_APPEND) {
 			old_value = *value;
 			old_value_len = *value_len;
 			new_value_len = old_value_len + bim->value_lens[i];
@@ -845,7 +852,7 @@ int range_server_bput(struct mdhim_t *md, struct mdhim_bputm_t *bim, int source)
 
 	//Put the record in the database
 	if ((ret = 
-	     index->mdhim_store->batch_put(index->mdhim_store->db_handle, 
+	     opendb->mdhim_store->batch_put(opendb->mdhim_store->db_handle, 
 					   bim->keys, bim->key_lens, new_values, 
 					   new_value_lens, bim->num_keys)) != MDHIM_SUCCESS) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error batch putting records", 
@@ -858,10 +865,10 @@ int range_server_bput(struct mdhim_t *md, struct mdhim_bputm_t *bim, int source)
 	for (i = 0; i < bim->num_keys && i < MAX_BULK_OPS; i++) {
 		//Update the stats if this key didn't exist before
 		if (!exists[i] && error == MDHIM_SUCCESS) {
-			update_stat(md, index, bim->keys[i], bim->key_lens[i]);
+			update_stat(opendb, bim->keys[i], bim->key_lens[i]);
 		}
 	       
-		if (exists[i] && md->db_opts->db_value_append == MDHIM_DB_APPEND) {
+		if (exists[i] && db_value_append == MDHIM_DB_APPEND) {
 			//Release the value created for appending the new and old value
 			free(new_values[i]);
 		}		
@@ -881,6 +888,7 @@ int range_server_bput(struct mdhim_t *md, struct mdhim_bputm_t *bim, int source)
 	gettimeofday(&end, NULL);
 	add_timing(start, end, num_put, md, MDHIM_BULK_PUT);
 
+	_find_opendb_dec_ref(bim->basem.db_path);
  done:
 	//Create the response message
 	brm = malloc(sizeof(struct mdhim_rm_t));

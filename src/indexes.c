@@ -610,22 +610,22 @@ int index_init_comm(struct mdhim_t *md, struct index_t *bi) {
 	return MDHIM_SUCCESS;
 }
 
-struct index_t *get_index(struct mdhim_t *md, int index_id) {
+struct index_t *get_index(struct mdhim_db *mdb, int index_id) {
 	struct index_t *index;
 
 	//Acquire the lock to update indexes	
-	while (pthread_rwlock_wrlock(md->indexes_lock) == EBUSY) {
+	while (pthread_rwlock_wrlock(mdb->indexes_lock) == EBUSY) {
 		usleep(10);
 	}		
 	
 	index = NULL;
 	if (index_id >= 0) {
-		HASH_FIND_INT(md->indexes, &index_id, index);
+		HASH_FIND_INT(mdb->indexes, &index_id, index);
 	}
 
-	if (pthread_rwlock_unlock(md->indexes_lock) != 0) {
+	if (pthread_rwlock_unlock(mdb->indexes_lock) != 0) {
 		mlog(MDHIM_CLIENT_CRIT, "Rank: %d - Error unlocking the indexes_lock", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
