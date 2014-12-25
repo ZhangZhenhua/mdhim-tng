@@ -103,14 +103,14 @@ struct mdhim_rm_t *local_client_bput(struct mdhim_bputm_t *bpm) {
 /**
  * Send bulk get to range server
  *
- * @param md main MDHIM struct
  * @param bgm pointer to get message to be sent or inserted into the range server's work queue
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_bgetrm_t *local_client_bget(struct mdhim_t *md, struct mdhim_bgetm_t *bgm) {
+struct mdhim_bgetrm_t *local_client_bget(struct mdhim_bgetm_t *bgm) {
 	int ret;
 	struct mdhim_bgetrm_t *rm;
 	work_item *item;
+	struct mdhim_t *md = &mdhim_gdata;
 
 	if ((item = malloc(sizeof(work_item))) == NULL) {
 		mlog(MDHIM_CLIENT_CRIT, "Error while allocating memory for client");

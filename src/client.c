@@ -278,18 +278,17 @@ struct mdhim_brm_t *client_bput(struct index_t *index,
 
 /** Send bulk get to range server
  *
- * @param md main MDHIM struct
  * @param bgm_list double pointer to an array or bulk get messages
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_bgetrm_t *client_bget(struct mdhim_t *md, struct index_t *index, 
-				   struct mdhim_bgetm_t **bgm_list) {
+struct mdhim_bgetrm_t *client_bget(struct index_t *index, struct mdhim_bgetm_t **bgm_list) {
 	int return_code;
 	struct mdhim_bgetrm_t *bgrm_head, *bgrm_tail, *bgrm;
 	struct mdhim_bgetrm_t **bgrm_list;
 	int i;
 	int *srvs;
 	int num_srvs;
+	struct mdhim_t *md = &mdhim_gdata;
 
 	num_srvs = 0;
 	srvs = malloc(sizeof(int) * index->num_rangesrvs);

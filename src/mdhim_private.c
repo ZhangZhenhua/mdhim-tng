@@ -141,7 +141,7 @@ struct mdhim_rm_t *_put_record(struct mdhim_db *mdb, struct index_t *index,
 
 	//Get the range server this key will be sent to
 	if (put_index->type == LOCAL_INDEX) {
-		if ((rl = get_range_servers(mdb, lookup_index, value, value_len)) == 
+		if ((rl = get_range_servers(lookup_index, value, value_len)) == 
 		    NULL) {
 			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 			     "Error while determining range server in mdhimBPut", 
@@ -150,7 +150,7 @@ struct mdhim_rm_t *_put_record(struct mdhim_db *mdb, struct index_t *index,
 		}
 	} else {
 		//Get the range server this key will be sent to
-		if ((rl = get_range_servers(mdb, lookup_index, key, key_len)) == NULL) {
+		if ((rl = get_range_servers(lookup_index, key, key_len)) == NULL) {
 			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 			     "Error while determining range server in _put_record", 
 			     mdhim_gdata.mdhim_rank);
@@ -278,7 +278,7 @@ struct mdhim_brm_t *_bput_records(struct mdhim_db *mdb, struct index_t *index,
 	for (i = 0; i < num_keys && i < MAX_BULK_OPS; i++) {
 		//Get the range server this key will be sent to
 		if (put_index->type == LOCAL_INDEX) {
-			if ((rl = get_range_servers(mdb, lookup_index, values[i], value_lens[i])) == 
+			if ((rl = get_range_servers(lookup_index, values[i], value_lens[i])) == 
 			    NULL) {
 				mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 				     "Error while determining range server in mdhimBPut", 
@@ -286,7 +286,7 @@ struct mdhim_brm_t *_bput_records(struct mdhim_db *mdb, struct index_t *index,
 				continue;
 			}
 		} else {
-			if ((rl = get_range_servers(mdb, lookup_index, keys[i], key_lens[i])) == 
+			if ((rl = get_range_servers(lookup_index, keys[i], key_lens[i])) == 
 			    NULL) {
 				mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 				     "Error while determining range server in mdhimBPut", 
@@ -367,8 +367,8 @@ struct mdhim_brm_t *_bput_records(struct mdhim_db *mdb, struct index_t *index,
 	return brm_head;
 }
 
-struct mdhim_bgetrm_t *_bget_records(struct mdhim_t *md, struct index_t *index,
-				     void **keys, int *key_lens, 
+struct mdhim_bgetrm_t *_bget_records(struct mdhim_db *mdb, struct index_t *index,
+				     void **keys, int *key_lens,
 				     int num_keys, int num_records, int op) {
 	struct mdhim_bgetm_t **bgm_list;
 	struct mdhim_bgetm_t *bgm, *lbgm;
@@ -392,7 +392,7 @@ struct mdhim_bgetrm_t *_bget_records(struct mdhim_t *md, struct index_t *index,
 		//Get the range server this key will be sent to
 		if ((op == MDHIM_GET_EQ || op == MDHIM_GET_PRIMARY_EQ) && 
 		    index->type != LOCAL_INDEX &&
-		    (rl = get_range_servers(md, index, keys[i], key_lens[i])) == 
+		    (rl = get_range_servers(index, keys[i], key_lens[i])) == 
 		    NULL) {
 			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 			     "Error while determining range server in mdhimBget", 
@@ -401,7 +401,7 @@ struct mdhim_bgetrm_t *_bget_records(struct mdhim_t *md, struct index_t *index,
 			return NULL;
 		} else if ((index->type == LOCAL_INDEX || 
 			   (op != MDHIM_GET_EQ && op != MDHIM_GET_PRIMARY_EQ)) &&
-			   (rl = get_range_servers_from_stats(md, index, keys[i], key_lens[i], op)) == 
+			   (rl = get_range_servers_from_stats(index, keys[i], key_lens[i], op)) == 
 			   NULL) {
 			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 			     "Error while determining range server in mdhimBget", 
@@ -433,7 +433,9 @@ struct mdhim_bgetrm_t *_bget_records(struct mdhim_t *md, struct index_t *index,
 				bgm->op = (op == MDHIM_GET_PRIMARY_EQ) ? MDHIM_GET_EQ : op;
 				bgm->basem.index = index->id;
 				bgm->basem.index_type = index->type;
-				if (rl->ri->rank != md->mdhim_rank) {
+				memset(bgm->basem.db_path, '\0', MDHIM_PATH_MAX);
+				strcpy(bgm->basem.db_path, mdb->db_opts->db_path);
+				if (rl->ri->rank != mdhim_gdata.mdhim_rank) {
 					bgm_list[rl->ri->rangesrv_num - 1] = bgm;
 				} else {
 					lbgm = bgm;
@@ -451,9 +453,9 @@ struct mdhim_bgetrm_t *_bget_records(struct mdhim_t *md, struct index_t *index,
 	}
 
 	//Make a list out of the received messages to return
-	bgrm_head = client_bget(md, index, bgm_list);
+	bgrm_head = client_bget(index, bgm_list);
 	if (lbgm) {
-		lbgrm = local_client_bget(md, lbgm);
+		lbgrm = local_client_bget(lbgm);
 		lbgrm->next = bgrm_head;
 		bgrm_head = lbgrm;
 	}
@@ -507,7 +509,7 @@ struct mdhim_brm_t *_bdel_records(struct mdhim_t *md, struct index_t *index,
 	for (i = 0; i < num_keys && i < MAX_BULK_OPS; i++) {
 		//Get the range server this key will be sent to
 		if (index->type != LOCAL_INDEX && 
-		    (rl = get_range_servers(md, index, keys[i], key_lens[i])) == 
+		    (rl = get_range_servers(index, keys[i], key_lens[i])) == 
 		    NULL) {
 			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 			     "Error while determining range server in mdhimBdel", 

@@ -1083,7 +1083,8 @@ int range_server_bget(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int source)
 	int error = 0;
 	struct timeval start, end;
 	int num_retrieved = 0;
-	struct index_t *index;
+	mdhim_open_db_t *opendb = NULL;
+	//struct index_t *index;
 
 	gettimeofday(&start, NULL);
 	values = malloc(sizeof(void *) * bgm->num_keys);
@@ -1091,10 +1092,10 @@ int range_server_bget(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int source)
 	memset(value_lens, 0, sizeof(int32_t) * bgm->num_keys);
 
 	//Get the index referenced the message
-	index = find_index(md, (struct mdhim_basem_t *) bgm);
-	if (!index) {
-		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving index for id: %d", 
-		     md->mdhim_rank, bgm->basem.index);
+	opendb = _find_opendb_inc_ref(bgm->basem.db_path);
+	if (!opendb) {
+		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for : %s", 
+		     md->mdhim_rank, bgm->basem.db_path);
 		error = MDHIM_ERROR;
 		goto done;
 	}
@@ -1105,24 +1106,25 @@ int range_server_bget(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int source)
 			// Gets the value for the given key
 		case MDHIM_GET_EQ:
 			//Get records from the database
-			if ((ret = 
-			     index->mdhim_store->get(index->mdhim_store->db_handle, 
+			if ((ret =
+			     opendb->mdhim_store->get(opendb->mdhim_store->db_handle, 
 						     bgm->keys[i], bgm->key_lens[i], &values[i], 
-						     &value_lens[i])) != MDHIM_SUCCESS) {			
+						     &value_lens[i])) != MDHIM_SUCCESS) {
 				error = ret;
 				value_lens[i] = 0;
 				values[i] = NULL;
 				continue;
 			}
-			
+
 			break;
 			/* Gets the next key and value that is in order after the passed in key */
-		case MDHIM_GET_NEXT:	
-			if ((ret = 
-			     index->mdhim_store->get_next(index->mdhim_store->db_handle, 
+		case MDHIM_GET_NEXT:
+			if ((ret =
+			     opendb->mdhim_store->get_next(opendb->mdhim_store->db_handle, 
 							  &bgm->keys[i], &bgm->key_lens[i], &values[i], 
 							  &value_lens[i])) != MDHIM_SUCCESS) {
-				mlog(MDHIM_SERVER_DBG, "Rank: %d - Error getting record", md->mdhim_rank);
+				mlog(MDHIM_SERVER_DBG, "Rank: %d - Error getting record",
+						mdhim_gdata.mdhim_rank);
 				error = ret;
 				value_lens[i] = 0;
 				values[i] = NULL;
@@ -1133,11 +1135,12 @@ int range_server_bget(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int source)
 			/* Gets the previous key and value that is in order before the passed in key
 			   or the last key if no key was passed in */
 		case MDHIM_GET_PREV:
-			if ((ret = 
-			     index->mdhim_store->get_prev(index->mdhim_store->db_handle, 
+			if ((ret =
+			     opendb->mdhim_store->get_prev(opendb->mdhim_store->db_handle, 
 							  &bgm->keys[i], &bgm->key_lens[i], &values[i], 
 							  &value_lens[i])) != MDHIM_SUCCESS) {
-				mlog(MDHIM_SERVER_DBG, "Rank: %d - Error getting record", md->mdhim_rank);
+				mlog(MDHIM_SERVER_DBG, "Rank: %d - Error getting record",
+						mdhim_gdata.mdhim_rank);
 				error = ret;
 				value_lens[i] = 0;
 				values[i] = NULL;
@@ -1147,11 +1150,12 @@ int range_server_bget(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int source)
 			break;
 			/* Gets the first key/value */
 		case MDHIM_GET_FIRST:
-			if ((ret = 
-			     index->mdhim_store->get_next(index->mdhim_store->db_handle, 
+			if ((ret =
+			     opendb->mdhim_store->get_next(opendb->mdhim_store->db_handle, 
 							  &bgm->keys[i], 0, &values[i], 
 							  &value_lens[i])) != MDHIM_SUCCESS) {
-				mlog(MDHIM_SERVER_DBG, "Rank: %d - Error getting record", md->mdhim_rank);
+				mlog(MDHIM_SERVER_DBG, "Rank: %d - Error getting record",
+						mdhim_gdata.mdhim_rank);
 				error = ret;
 				value_lens[i] = 0;
 				values[i] = NULL;
@@ -1161,11 +1165,12 @@ int range_server_bget(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int source)
 			break;
 			/* Gets the last key/value */
 		case MDHIM_GET_LAST:
-			if ((ret = 
-			     index->mdhim_store->get_prev(index->mdhim_store->db_handle, 
+			if ((ret =
+			     opendb->mdhim_store->get_prev(opendb->mdhim_store->db_handle, 
 							  &bgm->keys[i], 0, &values[i], 
 							  &value_lens[i])) != MDHIM_SUCCESS) {
-				mlog(MDHIM_SERVER_DBG, "Rank: %d - Error getting record", md->mdhim_rank);
+				mlog(MDHIM_SERVER_DBG, "Rank: %d - Error getting record",
+						mdhim_gdata.mdhim_rank);
 				error = ret;
 				value_lens[i] = 0;
 				values[i] = NULL;
@@ -1174,13 +1179,15 @@ int range_server_bget(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int source)
 
 			break;
 		default:
-			mlog(MDHIM_SERVER_DBG, "Rank: %d - Invalid operation: %d given in range_server_get", 
-			     md->mdhim_rank, bgm->op);
+			mlog(MDHIM_SERVER_DBG, "Rank: %d - Invalid operation: %d "
+					"given in range_server_get",
+					mdhim_gdata.mdhim_rank, bgm->op);
 			continue;
-		}	  
+		}
 
-		num_retrieved++;			
+		num_retrieved++;
 	}
+	_find_opendb_dec_ref(bgm->basem.db_path);
 
 	gettimeofday(&end, NULL);
 	add_timing(start, end, num_retrieved, md, MDHIM_BULK_GET);
@@ -1193,11 +1200,11 @@ done:
 	//Set the operation return code as the error
 	bgrm->error = error;
 	//Set the server's rank
-	bgrm->basem.server_rank = md->mdhim_rank;
+	bgrm->basem.server_rank = mdhim_gdata.mdhim_rank;
 	//Set the key and value
-	if (source == md->mdhim_rank) {
+	if (source == mdhim_gdata.mdhim_rank) {
 		//If this message is coming from myself, copy the keys
-		bgrm->key_lens = malloc(bgm->num_keys * sizeof(int));		
+		bgrm->key_lens = malloc(bgm->num_keys * sizeof(int));
 		bgrm->keys = malloc(bgm->num_keys * sizeof(void *));
 		for (i = 0; i < bgm->num_keys; i++) {
 			bgrm->key_lens[i] = bgm->key_lens[i];
@@ -1215,11 +1222,11 @@ done:
 	bgrm->values = values;
 	bgrm->value_lens = value_lens;
 	bgrm->num_keys = bgm->num_keys;
-	bgrm->basem.index = index->id;
-	bgrm->basem.index_type = index->type;
+	//bgrm->basem.index = index->id;
+	//bgrm->basem.index_type = index->type;
 
 	//Send response
-	ret = send_locally_or_remote(md, source, bgrm);
+	ret = send_locally_or_remote(&mdhim_gdata, source, bgrm);
 
 	//Release the bget message
 	free(bgm);
@@ -1251,8 +1258,10 @@ int range_server_bget_op(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int sour
 	int ret;
 	int i, j;
 	int num_records;
+	int inc_ref = 0;
 	struct timeval start, end;
-	struct index_t *index;
+	mdhim_open_db_t *opendb = NULL;
+	//struct index_t *index;
 
 	//Initialize pointers and lengths
 	values = malloc(sizeof(void *) * bgm->num_keys * bgm->num_recs);
@@ -1271,13 +1280,14 @@ int range_server_bget_op(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int sour
 	num_records = 0;
 
 	//Get the index referenced the message
-	index = find_index(md, (struct mdhim_basem_t *) bgm);
-	if (!index) {
-		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving index for id: %d", 
-		     md->mdhim_rank, bgm->basem.index);
+	opendb = _find_opendb_inc_ref(bgm->basem.db_path);
+	if (!opendb) {
+		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for id: %s", 
+		     md->mdhim_rank, bgm->basem.db_path);
 		error = MDHIM_ERROR;
 		goto respond;
 	}
+	inc_ref = 1;
 
 	if (bgm->num_keys * bgm->num_recs > MAX_BULK_OPS) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Too many bulk operations requested", 
@@ -1317,7 +1327,7 @@ int range_server_bget_op(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int sour
 				}
 			case MDHIM_GET_NEXT:	
 				if (j && (ret = 
-					  index->mdhim_store->get_next(index->mdhim_store->db_handle, 
+					  opendb->mdhim_store->get_next(opendb->mdhim_store->db_handle, 
 								       get_key, get_key_len, 
 								       get_value, 
 								       get_value_len)) 
@@ -1329,7 +1339,7 @@ int range_server_bget_op(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int sour
 					value_lens[num_records] = 0;
 					goto respond;
 				} else if (!j && (ret = 
-						  index->mdhim_store->get(index->mdhim_store->db_handle, 
+						  opendb->mdhim_store->get(opendb->mdhim_store->db_handle, 
 									  *get_key, *get_key_len, 
 									  get_value, 
 									  get_value_len))
@@ -1347,7 +1357,7 @@ int range_server_bget_op(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int sour
 				}
 			case MDHIM_GET_PREV:
 				if (j && (ret = 
-					  index->mdhim_store->get_prev(index->mdhim_store->db_handle, 
+					  opendb->mdhim_store->get_prev(opendb->mdhim_store->db_handle, 
 								       get_key, get_key_len, 
 								       get_value, 
 								       get_value_len)) 
@@ -1359,7 +1369,7 @@ int range_server_bget_op(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int sour
 					value_lens[num_records] = 0;
 					goto respond;
 				} else if (!j && (ret = 
-						  index->mdhim_store->get(index->mdhim_store->db_handle, 
+						  opendb->mdhim_store->get(opendb->mdhim_store->db_handle, 
 									  *get_key, *get_key_len, 
 									  get_value, 
 									  get_value_len))
@@ -1386,6 +1396,9 @@ int range_server_bget_op(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int sour
 	}
 
 respond:
+	if (inc_ref == 1) {
+		_find_opendb_dec_ref(bgm->basem.db_path);
+	}
 
 	gettimeofday(&end, NULL);
 	add_timing(start, end, num_records, md, MDHIM_BULK_GET);
@@ -1404,8 +1417,8 @@ respond:
 	bgrm->values = values;
 	bgrm->value_lens = value_lens;
 	bgrm->num_keys = num_records;
-	bgrm->basem.index = index->id;
-	bgrm->basem.index_type = index->type;
+	//bgrm->basem.index = index->id;
+	//bgrm->basem.index_type = index->type;
        
 	//Send response
 	ret = send_locally_or_remote(md, source, bgrm);

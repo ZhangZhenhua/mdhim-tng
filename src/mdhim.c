@@ -608,15 +608,15 @@ struct mdhim_brm_t *mdhimBPutSecondary(struct mdhim_db *mdb, struct index_t *sec
 /**
  * Retrieves a single record from MDHIM
  *
- * @param md main MDHIM struct
+ * @param mdb       MDHIM database struct
  * @param key       pointer to key to get value of or last key to start from if op is 
  (MDHIM_GET_NEXT or MDHIM_GET_PREV)
  * @param key_len   the length of the key
  * @param op        the operation type
  * @return mdhim_getrm_t * or NULL on error
  */
-struct mdhim_bgetrm_t *mdhimGet(struct mdhim_t *md, struct index_t *index,
-				void *key, int key_len, 
+struct mdhim_bgetrm_t *mdhimGet(struct mdhim_db *mdb, struct index_t *index,
+				void *key, int key_len,
 				int op) {
 
 	void **keys;
@@ -624,14 +624,14 @@ struct mdhim_bgetrm_t *mdhimGet(struct mdhim_t *md, struct index_t *index,
 	struct mdhim_bgetrm_t *bgrm_head;
 
 	if (op != MDHIM_GET_EQ && op != MDHIM_GET_PRIMARY_EQ) {
-		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
-		     "Invalid op specified for mdhimGet", 
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
+		     "Invalid op specified for mdhimGet",
 		     md->mdhim_rank);
 		return NULL;
 	}
 
 	if (!index) {
-		index = md->primary_index;
+		index = mdb->primary_index;
 	}
 
 	//Create an a array with the single key and key len passed in
@@ -641,7 +641,7 @@ struct mdhim_bgetrm_t *mdhimGet(struct mdhim_t *md, struct index_t *index,
 	key_lens[0] = key_len;
 
 	//Get the linked list of return messages from mdhimBGet
-	bgrm_head = _bget_records(md, index, keys, key_lens, 1, 1, op);
+	bgrm_head = _bget_records(mdb, index, keys, key_lens, 1, 1, op);
 
 	//Clean up
 	free(keys);
@@ -653,14 +653,14 @@ struct mdhim_bgetrm_t *mdhimGet(struct mdhim_t *md, struct index_t *index,
 /**
  * Retrieves multiple records from MDHIM
  *
- * @param md main MDHIM struct
+ * @param mdb		MDHIM database struct
  * @param keys         pointer to array of keys to get values for
  * @param key_lens     array with lengths of each key in keys
  * @param num_records  the number of keys to get (i.e., the number of keys in keys array)
  * @return mdhim_bgetrm_t * or NULL on error
  */
-struct mdhim_bgetrm_t *mdhimBGet(struct mdhim_t *md, struct index_t *index,
-				 void **keys, int *key_lens, 
+struct mdhim_bgetrm_t *mdhimBGet(struct mdhim_db *mdb, struct index_t *index,
+				 void **keys, int *key_lens,
 				 int num_keys, int op) {
 	struct mdhim_bgetrm_t *bgrm_head, *lbgrm;
 	void **primary_keys;
@@ -669,8 +669,8 @@ struct mdhim_bgetrm_t *mdhimBGet(struct mdhim_t *md, struct index_t *index,
 	int i;
 
 	if (op != MDHIM_GET_EQ && op != MDHIM_GET_PRIMARY_EQ) {
-		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
-		     "Invalid operation for mdhimBGet", 
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
+		     "Invalid operation for mdhimBGet",
 		     md->mdhim_rank);
 		return NULL;
 	}
@@ -690,7 +690,7 @@ struct mdhim_bgetrm_t *mdhimBGet(struct mdhim_t *md, struct index_t *index,
 		return NULL;
 	}
 
-	bgrm_head = _bget_records(md, index, keys, key_lens, num_keys, 1, op);
+	bgrm_head = _bget_records(mdb, index, keys, key_lens, num_keys, 1, op);
 	if (!bgrm_head) {
 		return NULL;
 	}
@@ -711,7 +711,7 @@ struct mdhim_bgetrm_t *mdhimBGet(struct mdhim_t *md, struct index_t *index,
 			     "Too many bulk operations would be performed " 
 			     "with the MDHIM_GET_PRIMARY_EQ operation.  Limiting "
 			     "request to : %u key/values", 
-			     md->mdhim_rank, MAX_BULK_OPS);
+			     mdhim_gdata.mdhim_rank, MAX_BULK_OPS);
 			plen = MAX_BULK_OPS - 1;
 		}
 
@@ -739,7 +739,7 @@ struct mdhim_bgetrm_t *mdhimBGet(struct mdhim_t *md, struct index_t *index,
 
 		primary_index = get_index(md, index->primary_id);	
 		//Get the primary keys' values
-		bgrm_head = _bget_records(md, primary_index,
+		bgrm_head = _bget_records(mdb, primary_index,
 					  primary_keys, primary_key_lens, 
 					  plen, 1, MDHIM_GET_EQ);
 
@@ -770,15 +770,15 @@ struct mdhim_bgetrm_t *mdhimBGet(struct mdhim_t *md, struct index_t *index,
  * then this operation will return the keys starting the first key on 
  * the range server that the key resolves to
  *
- * @param md           main MDHIM struct
+ * @param mdb          main MDHIM database struct
  * @param key          pointer to the key to start getting next entries from
  * @param key_len      the length of the key
  * @param num_records  the number of successive keys to get
  * @param op           the operation to perform (i.e., MDHIM_GET_NEXT or MDHIM_GET_PREV)
  * @return mdhim_bgetrm_t * or NULL on error
  */
-struct mdhim_bgetrm_t *mdhimBGetOp(struct mdhim_t *md, struct index_t *index, 
-				   void *key, int key_len, 
+struct mdhim_bgetrm_t *mdhimBGetOp(struct mdhim_db *mdb, struct index_t *index,
+				   void *key, int key_len,
 				   int num_records, int op) {
 	void **keys;
 	int *key_lens;
@@ -787,14 +787,14 @@ struct mdhim_bgetrm_t *mdhimBGetOp(struct mdhim_t *md, struct index_t *index,
 	if (num_records > MAX_BULK_OPS) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "To many bulk operations requested in mdhimBGetOp", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
 	if (op == MDHIM_GET_EQ || op == MDHIM_GET_PRIMARY_EQ) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Invalid op specified for mdhimGet", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
@@ -805,7 +805,7 @@ struct mdhim_bgetrm_t *mdhimBGetOp(struct mdhim_t *md, struct index_t *index,
 	key_lens[0] = key_len;
 
 	//Get the linked list of return messages from mdhimBGet
-	bgrm_head = _bget_records(md, index, keys, key_lens, 1, num_records, op);
+	bgrm_head = _bget_records(mdb, index, keys, key_lens, 1, num_records, op);
 
 	//Clean up
 	free(keys);
