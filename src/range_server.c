@@ -84,6 +84,7 @@ int send_locally_or_remote(struct mdhim_t *md, int dest, void *message) {
 	return ret;
 }
 
+#if 0
 struct index_t *find_index(struct mdhim_t *md, struct mdhim_basem_t *msg) {
 	struct index_t *ret;
        
@@ -92,6 +93,7 @@ struct index_t *find_index(struct mdhim_t *md, struct mdhim_basem_t *msg) {
 	return ret;
 
 }
+#endif
 
 /**
  * update_stat
@@ -924,24 +926,26 @@ int range_server_bput(struct mdhim_t *md, struct mdhim_bputm_t *bim, int source)
 int range_server_del(struct mdhim_t *md, struct mdhim_delm_t *dm, int source) {
 	int ret = MDHIM_ERROR;
 	struct mdhim_rm_t *rm;
-	struct index_t *index;
+	mdhim_open_db_t *opendb = NULL;
+	//struct index_t *index;
 
 	//Get the index referenced the message
-	index = find_index(md, (struct mdhim_basem_t *) dm);
-	if (!index) {
-		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving index for id: %d", 
-		     md->mdhim_rank, dm->basem.index);
+	opendb = _find_opendb_inc_ref(dm->basem.db_path);
+	if (!opendb) {
+		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for: %s", 
+		     md->mdhim_rank, dm->basem.db_path);
 		ret = MDHIM_ERROR;
 		goto done;
 	}
 
 	//Put the record in the database
-	if ((ret = 
-	     index->mdhim_store->del(index->mdhim_store->db_handle, 
+	if ((ret =
+	     opendb->mdhim_store->del(opendb->mdhim_store->db_handle,
 				     dm->key, dm->key_len)) != MDHIM_SUCCESS) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error deleting record", 
 		     md->mdhim_rank);
 	}
+	_find_opendb_dec_ref(dm->basem.db_path);
 
  done:
 	//Create the response message
@@ -974,13 +978,14 @@ int range_server_bdel(struct mdhim_t *md, struct mdhim_bdelm_t *bdm, int source)
 	int ret;
 	int error = 0;
 	struct mdhim_rm_t *brm;
-	struct index_t *index;
+	//struct index_t *index;
+	mdhim_open_db_t *opendb = NULL;
 
 	//Get the index referenced the message
-	index = find_index(md, (struct mdhim_basem_t *) bdm);
-	if (!index) {
-		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving index for id: %d", 
-		     md->mdhim_rank, bdm->basem.index);
+	opendb = _find_opendb_inc_ref(bdm->basem.db_path);
+	if (!opendb) {
+		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for: %s", 
+		     md->mdhim_rank, bdm->basem.db_path);
 		error = MDHIM_ERROR;
 		goto done;
 	}
@@ -988,15 +993,16 @@ int range_server_bdel(struct mdhim_t *md, struct mdhim_bdelm_t *bdm, int source)
 	//Iterate through the arrays and delete each record
 	for (i = 0; i < bdm->num_keys && i < MAX_BULK_OPS; i++) {
 		//Put the record in the database
-		if ((ret = 
-		     index->mdhim_store->del(index->mdhim_store->db_handle, 
-					     bdm->keys[i], bdm->key_lens[i])) 
+		if ((ret =
+		     opendb->mdhim_store->del(opendb->mdhim_store->db_handle,
+					     bdm->keys[i], bdm->key_lens[i]))
 		    != MDHIM_SUCCESS) {
 			mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error deleting record", 
 			     md->mdhim_rank);
 			error = ret;
 		}
 	}
+	_find_opendb_dec_ref(bdm->basem.db_path);
 
 done:
 	//Create the response message

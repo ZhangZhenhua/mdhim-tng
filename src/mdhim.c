@@ -817,12 +817,12 @@ struct mdhim_bgetrm_t *mdhimBGetOp(struct mdhim_db *mdb, struct index_t *index,
 /**
  * Deletes a single record from MDHIM
  *
- * @param md main MDHIM struct
+ * @param mdb       MDHIM database struct
  * @param key       pointer to key to delete
  * @param key_len   the length of the key
  * @return mdhim_rm_t * or NULL on error
  */
-struct mdhim_brm_t *mdhimDelete(struct mdhim_t *md, struct index_t *index, 
+struct mdhim_brm_t *mdhimDelete(struct mdhim_db *mdb, struct index_t *index,
 				void *key, int key_len) {
 	struct mdhim_brm_t *brm_head;
 	void **keys;
@@ -833,7 +833,7 @@ struct mdhim_brm_t *mdhimDelete(struct mdhim_t *md, struct index_t *index,
 	keys[0] = key;
 	key_lens[0] = key_len;
 
-	brm_head = _bdel_records(md, index, keys, key_lens, 1);
+	brm_head = _bdel_records(mdb, index, keys, key_lens, 1);
 	
 	free(keys);
 	free(key_lens);
@@ -844,13 +844,13 @@ struct mdhim_brm_t *mdhimDelete(struct mdhim_t *md, struct index_t *index,
 /**
  * Deletes multiple records from MDHIM
  *
- * @param md main MDHIM struct
+ * @param mdb          MDHIM database struct
  * @param keys         pointer to array of keys to delete
  * @param key_lens     array with lengths of each key in keys
  * @param num_records  the number of keys to delete (i.e., the number of keys in keys array)
  * @return mdhim_brm_t * or NULL on error
  */
-struct mdhim_brm_t *mdhimBDelete(struct mdhim_t *md, struct index_t *index,
+struct mdhim_brm_t *mdhimBDelete(struct mdhim_db *mdb, struct index_t *index,
 				 void **keys, int *key_lens,
 				 int num_records) {
 	struct mdhim_brm_t *brm_head;
@@ -859,11 +859,11 @@ struct mdhim_brm_t *mdhimBDelete(struct mdhim_t *md, struct index_t *index,
 	if (num_records > MAX_BULK_OPS) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "To many bulk operations requested in mdhimBGetOp", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
-	brm_head = _bdel_records(md, index, keys, key_lens, num_records);
+	brm_head = _bdel_records(mdb, index, keys, key_lens, num_records);
 
 	//Return the head of the list
 	return brm_head;

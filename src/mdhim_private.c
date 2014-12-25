@@ -478,13 +478,13 @@ struct mdhim_bgetrm_t *_bget_records(struct mdhim_db *mdb, struct index_t *index
 /**
  * Deletes multiple records from MDHIM
  *
- * @param md main MDHIM struct
+ * @param mdb          MDHIM database struct
  * @param keys         pointer to array of keys to delete
  * @param key_lens     array with lengths of each key in keys
  * @param num_keys  the number of keys to delete (i.e., the number of keys in keys array)
  * @return mdhim_brm_t * or NULL on error
  */
-struct mdhim_brm_t *_bdel_records(struct mdhim_t *md, struct index_t *index,
+struct mdhim_brm_t *_bdel_records(struct mdhim_t *mdb, struct index_t *index,
 				  void **keys, int *key_lens,
 				  int num_keys) {
 	struct mdhim_bdelm_t **bdm_list;
@@ -513,19 +513,19 @@ struct mdhim_brm_t *_bdel_records(struct mdhim_t *md, struct index_t *index,
 		    NULL) {
 			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 			     "Error while determining range server in mdhimBdel", 
-			     md->mdhim_rank);
+			     mdhim_gdata.mdhim_rank);
 			continue;
 		} else if (index->type == LOCAL_INDEX && 
-			   (rl = get_range_servers_from_stats(md, index, keys[i], 
+			   (rl = get_range_servers_from_stats(index, keys[i], 
 							      key_lens[i], MDHIM_GET_EQ)) == 
 			   NULL) {
 			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 			     "Error while determining range server in mdhimBdel", 
-			     md->mdhim_rank);
+			     mdhim_gdata.mdhim_rank);
 			continue;
 		}
        
-		if (rl->ri->rank != md->mdhim_rank) {
+		if (rl->ri->rank != mdhim_gdata.mdhim_rank) {
 			//Set the message in the list for this range server
 			bdm = bdm_list[rl->ri->rangesrv_num - 1];
 		} else {
@@ -535,7 +535,7 @@ struct mdhim_brm_t *_bdel_records(struct mdhim_t *md, struct index_t *index,
 
 		//If the message doesn't exist, create one
 		if (!bdm) {
-			bdm = malloc(sizeof(struct mdhim_bdelm_t));			       
+			bdm = malloc(sizeof(struct mdhim_bdelm_t));
 			bdm->keys = malloc(sizeof(void *) * MAX_BULK_OPS);
 			bdm->key_lens = malloc(sizeof(int) * MAX_BULK_OPS);
 			bdm->num_keys = 0;
@@ -543,6 +543,8 @@ struct mdhim_brm_t *_bdel_records(struct mdhim_t *md, struct index_t *index,
 			bdm->basem.mtype = MDHIM_BULK_DEL;
 			bdm->basem.index = index->id;
 			bdm->basem.index_type = index->type;
+			memset(bdm->basem.db_path, '\0', MDHIM_PATH_MAX);
+			strcpy(bdm->basem.db_path, mdb->db_opts->db_path);
 			if (rl->ri->rank != md->mdhim_rank) {
 				bdm_list[rl->ri->rangesrv_num - 1] = bdm;
 			} else {
@@ -553,11 +555,11 @@ struct mdhim_brm_t *_bdel_records(struct mdhim_t *md, struct index_t *index,
 		//Add the key, lengths, and data to the message
 		bdm->keys[bdm->num_keys] = keys[i];
 		bdm->key_lens[bdm->num_keys] = key_lens[i];
-		bdm->num_keys++;		
+		bdm->num_keys++;
 	}
 
 	//Make a list out of the received messages to return
-	brm_head = client_bdelete(md, index, bdm_list);
+	brm_head = client_bdelete(index, bdm_list);
 	if (lbdm) {
 		rm = local_client_bdelete(md, lbdm);
 		brm = malloc(sizeof(struct mdhim_brm_t));
@@ -568,7 +570,7 @@ struct mdhim_brm_t *_bdel_records(struct mdhim_t *md, struct index_t *index,
 		brm->basem.server_rank = rm->basem.server_rank;
 		brm->next = brm_head;
 		brm_head = brm;
-		free(rm);	
+		free(rm);
 	}
 	
 	for (i = 0; i < index->num_rangesrvs; i++) {

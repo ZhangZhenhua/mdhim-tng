@@ -386,14 +386,14 @@ struct mdhim_bgetrm_t *client_bget_op(struct mdhim_t *md, struct mdhim_getm_t *g
 /**
  * Send delete to range server
  *
- * @param md main MDHIM struct
  * @param dm pointer to del message to be sent or inserted into the range server's work queue
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_rm_t *client_delete(struct mdhim_t *md, struct mdhim_delm_t *dm) {
+struct mdhim_rm_t *client_delete(struct mdhim_delm_t *dm) {
 
 	int return_code;
-	struct mdhim_rm_t *rm;       
+	struct mdhim_rm_t *rm;
+	struct mdhim_t *md = &mdhim_gdata;
 
 	return_code = send_rangesrv_work(md, dm->basem.server_rank, dm);
 	// If the send did not succeed then log the error code and return MDHIM_ERROR
@@ -418,18 +418,17 @@ struct mdhim_rm_t *client_delete(struct mdhim_t *md, struct mdhim_delm_t *dm) {
 /**
  * Send bulk delete to range server
  *
- * @param md main MDHIM struct
  * @param bdm_list double pointer to an array of bulk del messages
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_brm_t *client_bdelete(struct mdhim_t *md, struct index_t *index, 
-				   struct mdhim_bdelm_t **bdm_list) {
+struct mdhim_brm_t *client_bdelete(struct index_t *index, struct mdhim_bdelm_t **bdm_list) {
 	int return_code;
 	struct mdhim_brm_t *brm_head, *brm_tail, *brm;
 	struct mdhim_rm_t **rm_list, *rm;
 	int i;
 	int *srvs;
 	int num_srvs;
+	struct mdhim_t *md = &mdhim_gdata;
 
 	num_srvs = 0;
 	srvs = malloc(sizeof(int) * index->num_rangesrvs);
