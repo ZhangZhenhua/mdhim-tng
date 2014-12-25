@@ -88,11 +88,11 @@ typedef struct index_manifest_t {
 struct mdhim_db;
 int open_db_store(struct mdhim_t *md, struct index_t *index);
 uint32_t get_num_range_servers(int rserver_factor);
-struct index_t *create_local_index(struct mdhim_t *md, int db_type, int key_type);
-struct index_t *create_global_index(struct mdhim_t *md, int server_factor, 
+struct index_t *create_local_index(struct mdhim_db *mdb, int db_type, int key_type);
+struct index_t *create_global_index(struct mdhim_db *mdb, int server_factor, 
 				    uint64_t max_recs_per_slice, int db_type, 
 				    int key_type);
-int get_rangesrvs(struct mdhim_t *md, struct index_t *index);
+int get_rangesrvs(struct mdhim_db *mdb, struct index_t *index);
 uint32_t is_range_server(struct mdhim_db *md, int rank, struct index_t *index);
 int index_init_comm(struct mdhim_t *md, struct index_t *bi);
 int get_stat_flush(struct mdhim_t *md, struct index_t *index);

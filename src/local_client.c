@@ -163,14 +163,14 @@ struct mdhim_bgetrm_t *local_client_bget_op(struct mdhim_t *md, struct mdhim_get
 /**
  * Send commit to range server
  *
- * @param md main MDHIM struct
  * @param cm pointer to put message to be inserted into the range server's work queue
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_rm_t *local_client_commit(struct mdhim_t *md, struct mdhim_basem_t *cm) {
+struct mdhim_rm_t *local_client_commit(struct mdhim_basem_t *cm) {
 	int ret;
 	struct mdhim_rm_t *rm;
 	work_item *item;
+	struct mdhim_t *md = &mdhim_gdata;
 
 	if ((item = malloc(sizeof(work_item))) == NULL) {
 		mlog(MDHIM_CLIENT_CRIT, "Error while allocating memory for client");
@@ -183,7 +183,7 @@ struct mdhim_rm_t *local_client_commit(struct mdhim_t *md, struct mdhim_basem_t 
 		mlog(MDHIM_CLIENT_CRIT, "Error adding work to range server in local_client_put");
 		return NULL;
 	}
-	
+
 	rm = (struct mdhim_rm_t *) get_msg_self(md);
 	// Return response
 
@@ -197,10 +197,11 @@ struct mdhim_rm_t *local_client_commit(struct mdhim_t *md, struct mdhim_basem_t 
  * @param dm pointer to delete message to be inserted into the range server's work queue
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_rm_t *local_client_delete(struct mdhim_t *md, struct mdhim_delm_t *dm) {
+struct mdhim_rm_t *local_client_delete(struct mdhim_delm_t *dm) {
 	int ret;
 	struct mdhim_rm_t *rm;
 	work_item *item;
+	struct mdhim_t *md = &mdhim_gdata;
 
 	if ((item = malloc(sizeof(work_item))) == NULL) {
 		mlog(MDHIM_CLIENT_CRIT, "Error while allocating memory for client");
@@ -224,14 +225,14 @@ struct mdhim_rm_t *local_client_delete(struct mdhim_t *md, struct mdhim_delm_t *
 /**
  * Send bulk delete to MDHIM
  *
- * @param md main MDHIM struct
  * @param bdm pointer to bulk delete message to be inserted into the range server's work queue
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_rm_t *local_client_bdelete(struct mdhim_t *md, struct mdhim_bdelm_t *bdm) {
+struct mdhim_rm_t *local_client_bdelete(struct mdhim_bdelm_t *bdm) {
 	int ret;
 	struct mdhim_rm_t *brm;
 	work_item *item;
+	struct mdhim_t *md = &mdhim_gdata;
 
 	if ((item = malloc(sizeof(work_item))) == NULL) {
 		mlog(MDHIM_CLIENT_CRIT, "Error while allocating memory for client");

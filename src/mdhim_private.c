@@ -396,7 +396,7 @@ struct mdhim_bgetrm_t *_bget_records(struct mdhim_db *mdb, struct index_t *index
 		    NULL) {
 			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 			     "Error while determining range server in mdhimBget", 
-			     md->mdhim_rank);
+			     mdhim_gdata.mdhim_rank);
 			free(bgm_list);
 			return NULL;
 		} else if ((index->type == LOCAL_INDEX || 
@@ -405,13 +405,13 @@ struct mdhim_bgetrm_t *_bget_records(struct mdhim_db *mdb, struct index_t *index
 			   NULL) {
 			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 			     "Error while determining range server in mdhimBget", 
-			     md->mdhim_rank);
+			     mdhim_gdata.mdhim_rank);
 			free(bgm_list);
 			return NULL;
 		}	   	
 
 		while (rl) {
-			if (rl->ri->rank != md->mdhim_rank) {
+			if (rl->ri->rank != mdhim_gdata.mdhim_rank) {
 				//Set the message in the list for this range server
 				bgm = bgm_list[rl->ri->rangesrv_num - 1];
 			} else {
@@ -484,7 +484,7 @@ struct mdhim_bgetrm_t *_bget_records(struct mdhim_db *mdb, struct index_t *index
  * @param num_keys  the number of keys to delete (i.e., the number of keys in keys array)
  * @return mdhim_brm_t * or NULL on error
  */
-struct mdhim_brm_t *_bdel_records(struct mdhim_t *mdb, struct index_t *index,
+struct mdhim_brm_t *_bdel_records(struct mdhim_db *mdb, struct index_t *index,
 				  void **keys, int *key_lens,
 				  int num_keys) {
 	struct mdhim_bdelm_t **bdm_list;
@@ -545,7 +545,7 @@ struct mdhim_brm_t *_bdel_records(struct mdhim_t *mdb, struct index_t *index,
 			bdm->basem.index_type = index->type;
 			memset(bdm->basem.db_path, '\0', MDHIM_PATH_MAX);
 			strcpy(bdm->basem.db_path, mdb->db_opts->db_path);
-			if (rl->ri->rank != md->mdhim_rank) {
+			if (rl->ri->rank != mdhim_gdata.mdhim_rank) {
 				bdm_list[rl->ri->rangesrv_num - 1] = bdm;
 			} else {
 				lbdm = bdm;
@@ -561,7 +561,7 @@ struct mdhim_brm_t *_bdel_records(struct mdhim_t *mdb, struct index_t *index,
 	//Make a list out of the received messages to return
 	brm_head = client_bdelete(index, bdm_list);
 	if (lbdm) {
-		rm = local_client_bdelete(md, lbdm);
+		rm = local_client_bdelete(lbdm);
 		brm = malloc(sizeof(struct mdhim_brm_t));
 		brm->error = rm->error;
 		brm->basem.mtype = rm->basem.mtype;

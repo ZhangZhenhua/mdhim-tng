@@ -87,7 +87,7 @@ int send_locally_or_remote(struct mdhim_t *md, int dest, void *message) {
 #if 0
 struct index_t *find_index(struct mdhim_t *md, struct mdhim_basem_t *msg) {
 	struct index_t *ret;
-       
+
 	ret = get_index(md, msg->index);
 
 	return ret;
@@ -1035,24 +1035,26 @@ done:
 int range_server_commit(struct mdhim_t *md, struct mdhim_basem_t *im, int source) {
 	int ret;
 	struct mdhim_rm_t *rm;
-	struct index_t *index;
+	//struct index_t *index;
+	mdhim_open_db_t *opendb = NULL;
 
 	//Get the index referenced the message
-	index = find_index(md, (struct mdhim_basem_t *) im);
-	if (!index) {
-		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving index for id: %d", 
-		     md->mdhim_rank, im->index);
+	opendb = _find_opendb_inc_ref(im->db_path);
+	if (!opendb) {
+		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for : %s", 
+		     md->mdhim_rank, im->db_path);
 		ret = MDHIM_ERROR;
 		goto done;
 	}
 
         //Put the record in the database
-	if ((ret = 
-	     index->mdhim_store->commit(index->mdhim_store->db_handle)) 
+	if ((ret =
+	     opendb->mdhim_store->commit(opendb->mdhim_store->db_handle))
 	    != MDHIM_SUCCESS) {
-		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error committing database", 
-		     md->mdhim_rank);	
+		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error committing database",
+		     md->mdhim_rank);
 	}
+	_find_opendb_dec_ref(im->db_path);
 
  done:	
 	//Create the response message
@@ -1760,7 +1762,7 @@ int range_server_init(struct mdhim_t *md, int num_wthreads) {
 	
 	//Initialize worker threads
 	md->mdhim_rs->workers = malloc(sizeof(pthread_t *) * md->mdhim_rs->num_wthreads);
-	for (i = 0; i < md->db_opts->num_wthreads; i++) {
+	for (i = 0; i < num_wthreads; i++) {
 		md->mdhim_rs->workers[i] = malloc(sizeof(pthread_t));
 		if ((ret = pthread_create(md->mdhim_rs->workers[i], NULL, 
 					  worker_thread, (void *) md)) != 0) {    

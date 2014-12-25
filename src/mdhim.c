@@ -300,29 +300,31 @@ out:
 }
 
 /**
- * Commits outstanding MDHIM writes - collective call
+ * Commits outstanding MDHIM writes - non collective call
  *
- * @param md main MDHIM struct
+ * @param mdb MDHIM database struct
  * @return MDHIM_SUCCESS or MDHIM_ERROR on error
  */
-int mdhimCommit(struct mdhim_t *md, struct index_t *index) {
+int mdhimCommit(struct mdhim_db *mdb, struct index_t *index) {
 	int ret = MDHIM_SUCCESS;
 	struct mdhim_basem_t *cm;
 	struct mdhim_rm_t *rm = NULL;
 
-	MPI_Barrier(md->mdhim_client_comm);      
+	//MPI_Barrier(md->mdhim_client_comm);
 	//If I'm a range server, send a commit message to myself
-	if (im_range_server(index)) {       
+	if (im_range_server(index)) {
 		cm = malloc(sizeof(struct mdhim_basem_t));
 		cm->mtype = MDHIM_COMMIT;
 		cm->index = index->id;
 		cm->index_type = index->type;
-		rm = local_client_commit(md, cm);
+		memset(cm->db_path, '\0', MDHIM_PATH_MAX);
+		strcpy(cm->db_path, mdb->db_opts->db_path);
+		rm = local_client_commit(cm);
 		if (!rm || rm->error) {
 			ret = MDHIM_ERROR;
-			mlog(MDHIM_SERVER_CRIT, "MDHIM Rank: %d - " 
+			mlog(MDHIM_SERVER_CRIT, "MDHIM Rank: %d - "
 			     "Error while committing database in mdhimCommit",
-			     md->mdhim_rank);
+			     mdhim_gdata.mdhim_rank);
 		}
 
 		if (rm) {
@@ -330,7 +332,7 @@ int mdhimCommit(struct mdhim_t *md, struct index_t *index) {
 		}
 	}
 
-	MPI_Barrier(md->mdhim_client_comm);      
+	//MPI_Barrier(md->mdhim_client_comm);
 
 	return ret;
 }

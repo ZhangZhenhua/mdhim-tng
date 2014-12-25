@@ -49,6 +49,8 @@ int open_manifest(mdhim_db_t *mdb, struct index_t *index, int flags) {
 	return fd;
 }
 
+int read_manifest(mdhim_db_t *mdb, struct index_t *index);
+
 /**
  * write_manifest
  * Writes out the manifest file
@@ -234,7 +236,7 @@ uint32_t get_num_range_servers(int range_server_factor) {
 	int size;
 	uint32_t num_servers = 0;
 	int i = 0;
-	int ret;
+	//int ret;
 
 	size = mdhim_gdata.mdhim_comm_size;
 	/* Get the number of range servers */
@@ -259,15 +261,15 @@ uint32_t get_num_range_servers(int range_server_factor) {
  * This index does not have global ordering.  Ordering is local to the range server only.
  * Retrieving a key from this index will require querying multiple range servers simultaneously.
  *
- * @param  md  main MDHIM struct
+ * @param  mdb MDHIM database struct
  * @return     MDHIM_ERROR on error, otherwise the index identifier
  */
-struct index_t *create_local_index(struct mdhim_t *md, int db_type, int key_type) {
+struct index_t *create_local_index(struct mdhim_db *mdb, int db_type, int key_type) {
 	struct index_t *li;
 	uint32_t rangesrv_num;
 	int ret;
 
-	MPI_Barrier(md->mdhim_client_comm);
+	//MPI_Barrier(md->mdhim_client_comm);
 
 	//Check that the key type makes sense
 	if (key_type < MDHIM_INT_KEY || key_type > MDHIM_BYTE_KEY) {
@@ -276,7 +278,7 @@ struct index_t *create_local_index(struct mdhim_t *md, int db_type, int key_type
 	}
 
 	//Acquire the lock to update indexes
-	while (pthread_rwlock_wrlock(md->indexes_lock) == EBUSY) {
+	while (pthread_rwlock_wrlock(mdb->indexes_lock) == EBUSY) {
 		usleep(10);
 	}		
 
@@ -288,73 +290,51 @@ struct index_t *create_local_index(struct mdhim_t *md, int db_type, int key_type
 
 	//Initialize the new index struct
 	memset(li, 0, sizeof(struct index_t));
-	li->id = HASH_COUNT(md->indexes);
-	li->range_server_factor = md->primary_index->range_server_factor;
+	li->id = HASH_COUNT(mdb->indexes);
+	li->range_server_factor = mdb->primary_index->range_server_factor;
 	li->mdhim_max_recs_per_slice = MDHIM_MAX_SLICES;
 	li->type = LOCAL_INDEX;
 	li->key_type = key_type;
 	li->db_type = db_type;
 	li->myinfo.rangesrv_num = 0;
-	li->myinfo.rank = md->mdhim_rank;
-	li->primary_id = md->primary_index->id;
+	li->myinfo.rank = mdhim_gdata.mdhim_rank;
+	li->primary_id = mdb->primary_index->id;
 	li->stats = NULL;
 
 	//Figure out how many range servers we could have based on the range server factor
 	li->num_rangesrvs = get_num_range_servers(li->range_server_factor);
 
 	//Get the range servers for this index
-	ret = get_rangesrvs(md, li);
+	ret = get_rangesrvs(mdb, li);
 	if (ret != MDHIM_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "Rank: %d - Couldn't get the range server list", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 	}
 
 	//Add it to the hash table
-	HASH_ADD_INT(md->indexes, id, li);
+	HASH_ADD_INT(mdb->indexes, id, li);
 
 	//Test if I'm a range server and get the range server number
-	if ((rangesrv_num = is_range_server(md, md->mdhim_rank, li)) == MDHIM_ERROR) {	
+	if ((rangesrv_num = is_range_server(mdb, mdhim_gdata.mdhim_rank, li)) == MDHIM_ERROR) {	
 		goto done;
 	}
 
 	if (rangesrv_num > 0) {
 		//Populate my range server info for this index
-		li->myinfo.rank = md->mdhim_rank;
+		li->myinfo.rank = mdhim_gdata.mdhim_rank;
 		li->myinfo.rangesrv_num = rangesrv_num;
 	}
 
 	//If not a range server, our work here is done
 	if (!rangesrv_num) {
 		goto done;
-	}	
-
-	//Read in the manifest file if the rangesrv_num is 1 for the primary index
-	if (rangesrv_num == 1 && 
-	    (ret = read_manifest(md, li)) != MDHIM_SUCCESS) {
-		mlog(MDHIM_SERVER_CRIT, "MDHIM Rank: %d - " 
-		     "Error: There was a problem reading or validating the manifest file",
-		     md->mdhim_rank);
-		MPI_Abort(md->mdhim_comm, 0);
-	}        
-
-	//Open the data store
-	ret = open_db_store(md, (struct index_t *) li);
-	if (ret != MDHIM_SUCCESS) {
-		mlog(MDHIM_CLIENT_CRIT, "Rank: %d - Error opening data store for index: %d", 
-		     md->mdhim_rank, li->id);
-		MPI_Abort(md->mdhim_comm, 0);
 	}
 
-	//Initialize the range server threads if they haven't been already
-	if (!md->mdhim_rs) {
-		ret = range_server_init(md);
-	}
-	
 done:
 	//Release the indexes lock
-	if (pthread_rwlock_unlock(md->indexes_lock) != 0) {
+	if (pthread_rwlock_unlock(mdb->indexes_lock) != 0) {
 		mlog(MDHIM_CLIENT_CRIT, "Rank: %d - Error unlocking the indexes_lock", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
@@ -372,13 +352,13 @@ done:
  * and keys can be retrieved across servers in order.  Retrieving a key will query only one range
  * server.
  *
- * @param md                 main MDHIM struct
+ * @param db                 MDHIM database struct
  * @param server_factor      used in calculating the number of range servers
  * @param max_recs_per_slice the number of records per slice
  * @return                   MDHIM_ERROR on error, otherwise the index identifier
  */
-struct index_t *create_global_index(mdhim_db_t *db, int server_factor, 
-				    uint64_t max_recs_per_slice, 
+struct index_t *create_global_index(mdhim_db_t *db, int server_factor,
+				    uint64_t max_recs_per_slice,
 				    int db_type, int key_type) {
 	struct index_t *gi;
 	uint32_t rangesrv_num;
@@ -488,7 +468,7 @@ int get_rangesrvs(mdhim_db_t *db, struct index_t *index) {
  */
 uint32_t is_range_server(mdhim_db_t *db, int rank, struct index_t *index) {
 	int size;
-	int ret;
+	//int ret;
 	uint64_t rangesrv_num = 0;
 
 	size = db->mdhim_comm_size;
@@ -635,7 +615,7 @@ struct index_t *get_index(struct mdhim_db *mdb, int index_id) {
 void indexes_release(mdhim_db_t *md) {
 	struct index_t *cur_indx, *tmp_indx;
 	struct rangesrv_info *cur_rs, *tmp_rs;
-	int ret;
+	//int ret;
 	struct mdhim_stat *stat, *tmp;
 
 	HASH_ITER(hh, md->indexes, cur_indx, tmp_indx) {
