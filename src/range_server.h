@@ -68,6 +68,13 @@ typedef struct mdhim_rs_t {
 	pthread_mutex_t *out_req_mutex;
 } mdhim_rs_t;
 
+/* opendb related functions */
+int add_opendb(mdhim_open_db_t *opendb);
+int del_opendb(char *path);
+mdhim_open_db_t* find_opendb(char *path);
+mdhim_open_db_t* find_opendb_inc_ref(char *path);
+mdhim_open_db_t* find_opendb_dec_ref(char *path);
+
 int range_server_add_work(struct mdhim_t *md, work_item *item);
 int range_server_init(struct mdhim_t *md, int num_wthreads);
 int range_server_init_comm(struct mdhim_t *md);

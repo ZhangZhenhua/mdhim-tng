@@ -677,7 +677,7 @@ void indexes_release(mdhim_db_t *md) {
 	}
 }
 
-int pack_stats(struct index_t *index, void *buf, int size, 
+int pack_stats(mdhim_open_db_t *opendb, void *buf, int size,
 	       int float_type, int stat_size, MPI_Comm comm) {
 	
 	struct mdhim_stat *stat, *tmp;
@@ -688,7 +688,7 @@ int pack_stats(struct index_t *index, void *buf, int size,
 	int sendidx = 0;
 
 	//Pack the stat data I have by iterating through the stats hash
-	HASH_ITER(hh, index->mdhim_store->mdhim_store_stats, stat, tmp) {
+	HASH_ITER(hh, opendb->mdhim_store->mdhim_store_stats, stat, tmp) {
 		//Get the appropriate struct to send
 		if (float_type) {
 			fstat = malloc(sizeof(struct mdhim_db_fstat));
@@ -722,7 +722,7 @@ int pack_stats(struct index_t *index, void *buf, int size,
 	return ret;
 }
 
-int get_stat_flush_global(struct mdhim_t *md, struct index_t *index) {
+int get_stat_flush_global(struct mdhim_db *mdb, struct index_t *index) {
 	char *sendbuf;
 	int sendsize = 0;
 	int recvidx = 0;
@@ -738,7 +738,8 @@ int get_stat_flush_global(struct mdhim_t *md, struct index_t *index) {
 	int stat_size = 0;
 	int master;
 	int num_items = 0;
-	
+	mdhim_open_db_t *opendb = NULL;
+
 	//Determine the size of the buffers to send based on the number and type of stats
 	if ((ret = is_float_key(index->key_type)) == 1) {
 		float_type = 1;
@@ -749,119 +750,116 @@ int get_stat_flush_global(struct mdhim_t *md, struct index_t *index) {
 	}
 
 	recvbuf = NULL;
-	if (index->myinfo.rangesrv_num > 0) {
-		//Get the number stats in our hash table
-		if (index->mdhim_store->mdhim_store_stats) {
-			num_items = HASH_COUNT(index->mdhim_store->mdhim_store_stats);
-		} else {
-			num_items = 0;
-		}
-		if ((ret = is_float_key(index->key_type)) == 1) {
-			sendsize = num_items * sizeof(struct mdhim_db_fstat);
-		} else {
-			sendsize = num_items * sizeof(struct mdhim_db_istat);
-		}
+	opendb = find_opendb_inc_ref(mdb->db_opts->db_path);
+	if (opendb == NULL) {
+		/* TODO error handling */
 	}
 
-	if (index->myinfo.rangesrv_num > 0) {	
-		//Get the master range server rank according the range server comm
-		if ((ret = MPI_Comm_size(index->rs_comm, &master)) != MPI_SUCCESS) {
-			mlog(MPI_CRIT, "Rank: %d - " 
-			     "Error getting size of comm", 
-			     md->mdhim_rank);			
-		}		
-		//The master rank is the last rank in range server comm
-		master--;
+	if (opendb->mdhim_store->mdhim_store_stats) {
+		num_items = HASH_COUNT(opendb->mdhim_store->mdhim_store_stats);
+	} else {
+		num_items = 0;
+	}
+	if ((ret = is_float_key(index->key_type)) == 1) {
+		sendsize = num_items * sizeof(struct mdhim_db_fstat);
+	} else {
+		sendsize = num_items * sizeof(struct mdhim_db_istat);
+	}
+
+	if (1) {
+		master = mdhim_gdata.mdhim_comm_size - 1;
 
 		//First we send the number of items that we are going to send
 		//Allocate the receive buffer size
-		recvsize = index->num_rangesrvs * sizeof(int);
+		recvsize = mdhim_gdata.mdhim_comm_size * sizeof(int);
 		recvbuf = malloc(recvsize);
 		memset(recvbuf, 0, recvsize);
-		MPI_Barrier(index->rs_comm);
+		MPI_Barrier(mdhim_gdata.mdhim_comm);
 		//The master server will receive the number of stats each server has
 		if ((ret = MPI_Gather(&num_items, 1, MPI_UNSIGNED, recvbuf, 1,
-				      MPI_INT, master, index->rs_comm)) != MPI_SUCCESS) {
-			mlog(MDHIM_SERVER_CRIT, "Rank: %d - " 
-			     "Error while receiving the number of statistics from each range server", 
-			     md->mdhim_rank);
+				      MPI_INT, master, mdhim_gdata.mdhim_comm)) != MPI_SUCCESS) {
+			mlog(MDHIM_SERVER_CRIT, "Rank: %d - "
+			     "Error while receiving the number of statistics "
+			     "from each range server",
+			     mdhim_gdata.mdhim_rank);
 			free(recvbuf);
 			goto error;
 		}
-		
+
 		num_items = 0;
-		displs = malloc(sizeof(int) * index->num_rangesrvs);
-		recvcounts = malloc(sizeof(int) * index->num_rangesrvs);
-		for (i = 0; i < index->num_rangesrvs; i++) {
+		displs = malloc(sizeof(int) * mdhim_gdata.mdhim_comm_size);
+		recvcounts = malloc(sizeof(int) * mdhim_gdata.mdhim_comm_size);
+		for (i = 0; i < mdhim_gdata.mdhim_comm_size; i++) {
 			displs[i] = num_items * stat_size;
 			num_items += ((int *)recvbuf)[i];
 			recvcounts[i] = ((int *)recvbuf)[i] * stat_size;
 		}
-		
+
 		free(recvbuf);
 		recvbuf = NULL;
 
 		//Allocate send buffer
-		sendbuf = malloc(sendsize);		  
+		sendbuf = malloc(sendsize);
 
 		//Pack the stat data I have by iterating through the stats hash table
-		ret =  pack_stats(index, sendbuf, sendsize,
-				  float_type, stat_size, index->rs_comm);
+		ret =  pack_stats(opendb, sendbuf, sendsize,
+				  float_type, stat_size, mdhim_gdata.mdhim_comm);
 		if (ret != MPI_SUCCESS) {
 			free(recvbuf);
 			goto error;
-		}	
+		}
 
 		//Allocate the recv buffer for the master range server
-		if (md->mdhim_rank == index->rangesrv_master) {
+		if (mdhim_gdata.mdhim_rank == master) {
 			recvsize = num_items * stat_size;
 			recvbuf = malloc(recvsize);
-			memset(recvbuf, 0, recvsize);		
+			memset(recvbuf, 0, recvsize);
 		} else {
 			recvbuf = NULL;
 			recvsize = 0;
 		}
 
-		MPI_Barrier(index->rs_comm);
-		//The master server will receive the stat info from each rank in the range server comm
+		MPI_Barrier(mdhim_gdata.mdhim_comm);
+		//The master server will receive the stat info from each
+		//rank in the range server comm
 		if ((ret = MPI_Gatherv(sendbuf, sendsize, MPI_PACKED, recvbuf, recvcounts, displs,
-				       MPI_PACKED, master, index->rs_comm)) != MPI_SUCCESS) {
-			mlog(MDHIM_SERVER_CRIT, "Rank: %d - " 
-			     "Error while receiving range server info", 
-			     md->mdhim_rank);			
+				       MPI_PACKED, master,mdhim_gdata.mdhim_comm)) != MPI_SUCCESS) {
+			mlog(MDHIM_SERVER_CRIT, "Rank: %d - "
+			     "Error while receiving range server info",
+			     mdhim_gdata.mdhim_rank);
 			goto error;
 		}
 
 		free(recvcounts);
 		free(displs);
-		free(sendbuf);	
-	} 
+		free(sendbuf);
+	}
 
-	MPI_Barrier(md->mdhim_client_comm);
+	MPI_Barrier(mdhim_gdata.mdhim_comm);
 	//The master range server broadcasts the number of stats it is going to send
-	if ((ret = MPI_Bcast(&num_items, 1, MPI_UNSIGNED, index->rangesrv_master,
-			     md->mdhim_comm)) != MPI_SUCCESS) {
-		mlog(MDHIM_CLIENT_CRIT, "Rank: %d - " 
-		     "Error while receiving the number of stats to receive", 
-		     md->mdhim_rank);
+	if ((ret = MPI_Bcast(&num_items, 1, MPI_UNSIGNED, master,
+			     mdhim_gdata.mdhim_comm)) != MPI_SUCCESS) {
+		mlog(MDHIM_CLIENT_CRIT, "Rank: %d - "
+		     "Error while receiving the number of stats to receive",
+		     mdhim_gdata.mdhim_rank);
 		goto error;
 	}
 
-	MPI_Barrier(md->mdhim_client_comm);
+	MPI_Barrier(mdhim_gdata.mdhim_comm);
 
 	recvsize = num_items * stat_size;
 	//Allocate the receive buffer size for clients
-	if (md->mdhim_rank != index->rangesrv_master) {
+	if (mdhim_gdata.mdhim_rank != master) {
 		recvbuf = malloc(recvsize);
 		memset(recvbuf, 0, recvsize);
 	}
 	
 	//The master range server broadcasts the receive buffer to the mdhim_comm
-	if ((ret = MPI_Bcast(recvbuf, recvsize, MPI_PACKED, index->rangesrv_master,
-			     md->mdhim_comm)) != MPI_SUCCESS) {
-		mlog(MPI_CRIT, "Rank: %d - " 
-		     "Error while receiving range server info", 
-		     md->mdhim_rank);
+	if ((ret = MPI_Bcast(recvbuf, recvsize, MPI_PACKED, master,
+			     mdhim_gdata.mdhim_comm)) != MPI_SUCCESS) {
+		mlog(MPI_CRIT, "Rank: %d - "
+		     "Error while receiving range server info",
+		     mdhim_gdata.mdhim_rank);
 		goto error;
 	}
 
@@ -871,10 +869,10 @@ int get_stat_flush_global(struct mdhim_t *md, struct index_t *index) {
 		tstat = malloc(stat_size);
 		memset(tstat, 0, stat_size);
 		if ((ret = MPI_Unpack(recvbuf, recvsize, &recvidx, tstat, stat_size, 
-				      MPI_CHAR, md->mdhim_comm)) != MPI_SUCCESS) {
-			mlog(MPI_CRIT, "Rank: %d - " 
-			     "Error while unpacking stat data", 
-			     md->mdhim_rank);
+				      MPI_CHAR, mdhim_gdata.mdhim_comm)) != MPI_SUCCESS) {
+			mlog(MPI_CRIT, "Rank: %d - "
+			     "Error while unpacking stat data",
+			     mdhim_gdata.mdhim_rank);
 			free(tstat);
 			goto error;
 		}	
@@ -908,6 +906,7 @@ int get_stat_flush_global(struct mdhim_t *md, struct index_t *index) {
 		free(tstat);
 	}
 
+	find_opendb_dec_ref(mdb->db_opts->db_path);
 	free(recvbuf);
 	return MDHIM_SUCCESS;
 
@@ -919,7 +918,7 @@ error:
 	return MDHIM_ERROR;
 }
 
-int get_stat_flush_local(struct mdhim_t *md, struct index_t *index) {
+int get_stat_flush_local(struct mdhim_db *mdb, struct index_t *index) {
 	char *sendbuf;
 	int sendsize = 0;
 	int recvidx = 0;
@@ -935,7 +934,8 @@ int get_stat_flush_local(struct mdhim_t *md, struct index_t *index) {
 	void *tstat;
 	int stat_size = 0;
 	int num_items = 0;
-	
+	mdhim_open_db_t *opendb = NULL;
+
 	//Determine the size of the buffers to send based on the number and type of stats
 	if ((ret = is_float_key(index->key_type)) == 1) {
 		float_type = 1;
@@ -946,40 +946,38 @@ int get_stat_flush_local(struct mdhim_t *md, struct index_t *index) {
 	}
 
 	recvbuf = NULL;
-	if (index->myinfo.rangesrv_num > 0) {
-		//Get the number stats in our hash table
-		if (index->mdhim_store->mdhim_store_stats) {
-			num_items = HASH_COUNT(index->mdhim_store->mdhim_store_stats);
-		} else {
-			num_items = 0;
-		}
-		if ((ret = is_float_key(index->key_type)) == 1) {
-			sendsize = num_items * sizeof(struct mdhim_db_fstat);
-		} else {
-			sendsize = num_items * sizeof(struct mdhim_db_istat);
-		}
+	//Get the number stats in our hash table
+	if (opendb->mdhim_store->mdhim_store_stats) {
+		num_items = HASH_COUNT(opendb->mdhim_store->mdhim_store_stats);
+	} else {
+		num_items = 0;
+	}
+	if ((ret = is_float_key(index->key_type)) == 1) {
+		sendsize = num_items * sizeof(struct mdhim_db_fstat);
+	} else {
+		sendsize = num_items * sizeof(struct mdhim_db_istat);
 	}
 
 	//First we send the number of items that we are going to send
 	//Allocate the receive buffer size
-	recvsize = md->mdhim_comm_size * sizeof(int);
+	recvsize = mdhim_gdata.mdhim_comm_size * sizeof(int);
 	recvbuf = malloc(recvsize);
 	memset(recvbuf, 0, recvsize);
-	MPI_Barrier(md->mdhim_client_comm);
+	MPI_Barrier(mdhim_gdata.mdhim_comm);
 	//All gather the number of items to send
 	if ((ret = MPI_Allgather(&num_items, 1, MPI_UNSIGNED, recvbuf, 1,
-				 MPI_INT, md->mdhim_comm)) != MPI_SUCCESS) {
+				 MPI_INT, mdhim_gdata.mdhim_comm)) != MPI_SUCCESS) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - " 
 		     "Error while receiving the number of statistics from each range server", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		free(recvbuf);
 		goto error;
 	}
-		
+
 	num_items = 0;
-	displs = malloc(sizeof(int) * md->mdhim_comm_size);
-	recvcounts = malloc(sizeof(int) * md->mdhim_comm_size);
-	for (i = 0; i < md->mdhim_comm_size; i++) {
+	displs = malloc(sizeof(int) * mdhim_gdata.mdhim_comm_size);
+	recvcounts = malloc(sizeof(int) * mdhim_gdata.mdhim_comm_size);
+	for (i = 0; i < mdhim_gdata.mdhim_comm_size; i++) {
 		displs[i] = num_items * stat_size;
 		num_items += ((int *)recvbuf)[i];
 		recvcounts[i] = ((int *)recvbuf)[i] * stat_size;
@@ -993,8 +991,8 @@ int get_stat_flush_local(struct mdhim_t *md, struct index_t *index) {
 		sendbuf = malloc(sendsize);		  
 	
 		//Pack the stat data I have by iterating through the stats hash table
-		ret =  pack_stats(index, sendbuf, sendsize,
-				  float_type, stat_size, md->mdhim_comm);
+		ret =  pack_stats(opendb, sendbuf, sendsize,
+				  float_type, stat_size, mdhim_gdata.mdhim_comm);
 		if (ret != MPI_SUCCESS) {
 			free(recvbuf);
 			goto error;
@@ -1007,13 +1005,13 @@ int get_stat_flush_local(struct mdhim_t *md, struct index_t *index) {
 	recvbuf = malloc(recvsize);
 	memset(recvbuf, 0, recvsize);		
 
-	MPI_Barrier(md->mdhim_client_comm);
+	MPI_Barrier(mdhim_gdata.mdhim_comm);
 	//The master server will receive the stat info from each rank in the range server comm
 	if ((ret = MPI_Allgatherv(sendbuf, sendsize, MPI_PACKED, recvbuf, recvcounts, displs,
-				   MPI_PACKED, md->mdhim_comm)) != MPI_SUCCESS) {
+				   MPI_PACKED, mdhim_gdata.mdhim_comm)) != MPI_SUCCESS) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - " 
 		     "Error while receiving range server info", 
-		     md->mdhim_rank);			
+		     mdhim_gdata.mdhim_rank);			
 		goto error;
 	}
 
@@ -1021,13 +1019,12 @@ int get_stat_flush_local(struct mdhim_t *md, struct index_t *index) {
 	free(displs);
 	free(sendbuf);	
 
-
-	MPI_Barrier(md->mdhim_client_comm);
+	MPI_Barrier(mdhim_gdata.mdhim_comm);
 
 	//Unpack the receive buffer and populate our index->stats hash table
 	recvidx = 0;
-	for (i = 0; i < md->mdhim_comm_size; i++) {
-		if ((ret = is_range_server(md, i, index)) < 1) {
+	for (i = 0; i < mdhim_gdata.mdhim_comm_size; i++) {
+		if ((ret = is_range_server(mdb, i, index)) < 1) {
 			continue;
 		}
 
@@ -1035,7 +1032,7 @@ int get_stat_flush_local(struct mdhim_t *md, struct index_t *index) {
 		if (!tmp) {
 			mlog(MPI_CRIT, "Rank: %d - " 
 			     "Adding rank: %d to local index stat data", 
-			     md->mdhim_rank, i);
+			     mdhim_gdata.mdhim_rank, i);
 			rank_stat = malloc(sizeof(struct mdhim_stat));
 			memset(rank_stat, 0, sizeof(struct mdhim_stat));
 			rank_stat->key = i;
@@ -1049,10 +1046,10 @@ int get_stat_flush_local(struct mdhim_t *md, struct index_t *index) {
 			tstat = malloc(stat_size);
 			memset(tstat, 0, stat_size);
 			if ((ret = MPI_Unpack(recvbuf, recvsize, &recvidx, tstat, stat_size, 
-					      MPI_CHAR, md->mdhim_comm)) != MPI_SUCCESS) {
+					      MPI_CHAR, mdhim_gdata.mdhim_comm)) != MPI_SUCCESS) {
 				mlog(MPI_CRIT, "Rank: %d - " 
 				     "Error while unpacking stat data", 
-				     md->mdhim_rank);
+				     mdhim_gdata.mdhim_rank);
 				free(tstat);
 				goto error;
 			}	
@@ -1075,15 +1072,16 @@ int get_stat_flush_local(struct mdhim_t *md, struct index_t *index) {
 				stat->num = ((struct mdhim_db_istat *)tstat)->num;
 			}
 		  
-			mlog(MPI_CRIT, "Rank: %d - " 
-			     "Adding rank: %d with stat min: %lu, stat max: %lu, stat key: %u num: %lu" 
-			     "to local index stat data", 
-			     md->mdhim_rank, i, *(uint64_t *)stat->min, *(uint64_t *)stat->max, 
+			mlog(MPI_CRIT, "Rank: %d - "
+			     "Adding rank: %d with stat min: %lu, stat max: %lu, "
+			     "stat key: %u num: %lu to local index stat data",
+			     mdhim_gdata.mdhim_rank, i, *(uint64_t *)stat->min,
+			     *(uint64_t *)stat->max,
 			     stat->key, stat->num);
 			HASH_FIND_INT(rank_stat->stats, &stat->key, tmp);
 			if (!tmp) {
-				HASH_ADD_INT(rank_stat->stats, key, stat); 
-			} else {	
+				HASH_ADD_INT(rank_stat->stats, key, stat);
+			} else {
 				//Replace the existing stat
 				HASH_REPLACE_INT(rank_stat->stats, key, stat, tmp);
 				free(tmp);
@@ -1110,21 +1108,21 @@ error:
  * get_stat_flush
  * Receives stat data from all the range servers and populates md->stats
  *
- * @param md      in   main MDHIM struct
+ * @param mdb      MDHIM database struct
  * @return MDHIM_SUCCESS or MDHIM_ERROR on error
  */
-int get_stat_flush(struct mdhim_t *md, struct index_t *index) {
+int get_stat_flush(struct mdhim_db *mdb, struct index_t *index) {
 	int ret;
 
-	pthread_mutex_lock(md->mdhim_comm_lock);
+	pthread_mutex_lock(mdhim_gdata.mdhim_comm_lock);
 
 	if (index->type != LOCAL_INDEX) {
-		ret = get_stat_flush_global(md, index);
+		ret = get_stat_flush_global(mdb, index);
 	} else {
-		ret = get_stat_flush_local(md, index);
+		ret = get_stat_flush_local(mdb, index);
 	}
 
-	pthread_mutex_unlock(md->mdhim_comm_lock);
+	pthread_mutex_unlock(mdhim_gdata.mdhim_comm_lock);
 
 	return ret;
 }

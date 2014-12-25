@@ -94,12 +94,6 @@ int mdhimInit(void *appComm, int num_wthreads) {
 		return NULL;
 	}
 
-	//Dup the communicator passed in for barriers between clients
-	if ((ret = MPI_Comm_dup(comm, &mdhim_gdata.mdhim_client_comm)) != MPI_SUCCESS) {
-		mlog(MDHIM_CLIENT_CRIT, "Error while initializing the MDHIM communicator");
-		return NULL;
-	}
-
 	//Get the size of the main MDHIM communicator
 	if ((ret = MPI_Comm_size(mdhim_gdata.mdhim_comm, &mdhim_gdata.mdhim_comm_size)) != MPI_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error getting the size of the " 
@@ -143,7 +137,7 @@ int mdhimInit(void *appComm, int num_wthreads) {
 
 	//Set the local receive queue to NULL - used for sending and receiving to/from ourselves
 	mdhim_gdata.receive_msg = NULL;
-	MPI_Barrier(mdhim_gdata.mdhim_client_comm);
+	MPI_Barrier(mdhim_gdata.mdhim_comm);
 
 	return md;
 }
@@ -159,7 +153,7 @@ int mdhimFinalize() {
 
 	mlog(MDHIM_CLIENT_DBG, "MDHIM Rank %d: Called finalize", mdhim_gdata.mdhim_rank);
 	gettimeofday(&start, NULL);
-	MPI_Barrier(md->mdhim_client_comm);
+	MPI_Barrier(mdhim_gdata.mdhim_comm);
 	gettimeofday(&end, NULL);
 	printf("Took: %lu seconds to complete first finalize barrier\n",
 		end.tv_sec - start.tv_sec);
@@ -189,7 +183,7 @@ int mdhimFinalize() {
 	free(mdhim_gdata.receive_msg_mutex);
 
 	gettimeofday(&start, NULL);
-	MPI_Barrier(mdhim_gdata.mdhim_client_comm);
+	MPI_Barrier(mdhim_gdata.mdhim_comm);
 	//Destroy the client_comm_lock
 	if ((ret = pthread_mutex_destroy(mdhim_gdata.mdhim_comm_lock)) != 0) {
 		return MDHIM_ERROR;
@@ -201,7 +195,7 @@ int mdhimFinalize() {
 	mlog(MDHIM_CLIENT_DBG, "MDHIM Rank %d: Finished finalize",
 		mdhim_gdata.mdhim_rank);
 
-	MPI_Comm_free(&mdhim_gdata.mdhim_client_comm);
+	MPI_Comm_free(&mdhim_gdata.mdhim_comm);
 	MPI_Comm_free(&mdhim_gdata.mdhim_comm);
         free(md);
 
@@ -479,7 +473,7 @@ struct mdhim_brm_t *mdhimPutSecondary(struct mdhim_db *mdb,
 	return head;
 }
 
-struct mdhim_brm_t *_bput_secondary_keys_from_info(struct mdhim_t *md, 
+struct mdhim_brm_t *_bput_secondary_keys_from_info(struct mdhim_db *mdb,
 						   struct secondary_bulk_info *secondary_info, 
 						   void **primary_keys, int *primary_key_lens, 
 						   int num_records) {
@@ -500,7 +494,7 @@ struct mdhim_brm_t *_bput_secondary_keys_from_info(struct mdhim_t *md,
 			primary_key_lens_to_send[j] = primary_key_lens[i];
 		}
 		
-		new = _bput_records(md, secondary_info->secondary_index, 
+		new = _bput_records(mdb, secondary_info->secondary_index, 
 				    secondary_info->secondary_keys[i], 
 				    secondary_info->secondary_key_lens[i], 
 				    primary_keys_to_send, primary_key_lens_to_send, 
@@ -628,7 +622,7 @@ struct mdhim_bgetrm_t *mdhimGet(struct mdhim_db *mdb, struct index_t *index,
 	if (op != MDHIM_GET_EQ && op != MDHIM_GET_PRIMARY_EQ) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
 		     "Invalid op specified for mdhimGet",
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
@@ -673,7 +667,7 @@ struct mdhim_bgetrm_t *mdhimBGet(struct mdhim_db *mdb, struct index_t *index,
 	if (op != MDHIM_GET_EQ && op != MDHIM_GET_PRIMARY_EQ) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
 		     "Invalid operation for mdhimBGet",
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
@@ -874,19 +868,19 @@ struct mdhim_brm_t *mdhimBDelete(struct mdhim_db *mdb, struct index_t *index,
 /**
  * Retrieves statistics from all the range servers - collective call
  *
- * @param md main MDHIM struct
+ * @param mdb MDHIM database struct
  * @return MDHIM_SUCCESS or MDHIM_ERROR on error
  */
-int mdhimStatFlush(struct mdhim_t *md, struct index_t *index) {
+int mdhimStatFlush(struct mdhim_db *mdb, struct index_t *index) {
 	int ret;
 
-	MPI_Barrier(md->mdhim_client_comm);	
-	if ((ret = get_stat_flush(md, index)) != MDHIM_SUCCESS) {
-		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
-		     "Error while getting MDHIM stat data in mdhimStatFlush", 
-		     md->mdhim_rank);
+	MPI_Barrier(mdhim_gdata.mdhim_comm);
+	if ((ret = get_stat_flush(mdb, index)) != MDHIM_SUCCESS) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
+		     "Error while getting MDHIM stat data in mdhimStatFlush",
+		     mdhim_gdata.mdhim_rank);
 	}
-	MPI_Barrier(md->mdhim_client_comm);	
+	MPI_Barrier(mdhim_gdata.mdhim_comm);
 
 	return ret;
 }

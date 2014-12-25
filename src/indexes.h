@@ -54,6 +54,7 @@ struct index_t {
 	uint64_t mdhim_max_recs_per_slice; 
 
 	//This communicator is for range servers only to talk to each other
+	//This is deprecated now. 2014-12-25.
 	MPI_Comm rs_comm;   
 	/* The rank of the range server master that will broadcast stat data to all clients
 	   This rank is the rank in mdhim_comm not in the range server communicator */
@@ -95,7 +96,7 @@ struct index_t *create_global_index(struct mdhim_db *mdb, int server_factor,
 int get_rangesrvs(struct mdhim_db *mdb, struct index_t *index);
 uint32_t is_range_server(struct mdhim_db *md, int rank, struct index_t *index);
 int index_init_comm(struct mdhim_t *md, struct index_t *bi);
-int get_stat_flush(struct mdhim_t *md, struct index_t *index);
+int get_stat_flush(struct mdhim_db *mdb, struct index_t *index);
 struct index_t *get_index(struct mdhim_db *mdb, int index_id);
 void indexes_release(struct mdhim_db *md);
 int im_range_server(struct index_t *index);

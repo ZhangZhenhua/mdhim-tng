@@ -402,14 +402,14 @@ work_item *get_work(struct mdhim_t *md) {
 
 /* XXX add lock to protect this hash table for the open/close
  * race. Well behavied applications should not have such issues. */
-int _add_opendb(mdhim_open_db_t *opendb) {
+int add_opendb(mdhim_open_db_t *opendb) {
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
 	HASH_ADD_STR(opendbs, db_path, opendb);
 	return 0;
 }
 
-int _del_opendb(char *path) {
+int del_opendb(char *path) {
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
@@ -421,7 +421,7 @@ int _del_opendb(char *path) {
 	return 0;
 }
 
-mdhim_open_db_t* _find_opendb(char *path) {
+mdhim_open_db_t* find_opendb(char *path) {
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
@@ -431,7 +431,7 @@ mdhim_open_db_t* _find_opendb(char *path) {
 }
 
 /* increase refcount if finding opendb in hash */
-mdhim_open_db_t* _find_opendb_inc_ref(char *path) {
+mdhim_open_db_t* find_opendb_inc_ref(char *path) {
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
@@ -442,7 +442,7 @@ mdhim_open_db_t* _find_opendb_inc_ref(char *path) {
 }
 
 /* decrease refcount if finding opendb in hash */
-mdhim_open_db_t* _find_opendb_dec_ref(char *path) {
+mdhim_open_db_t* find_opendb_dec_ref(char *path) {
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
@@ -543,7 +543,7 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 	struct mdhim_store_t *mdhim_store = NULL;
 	mdhim_open_db_t *opendb = NULL;
 
-	opendb = _find_opendb_inc_ref(om->basem.db_path);
+	opendb = find_opendb_inc_ref(om->basem.db_path);
 	if (opendb != NULL) {
 		goto out;
 	}
@@ -580,7 +580,7 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 	strcpy(opendb->db_path, om->basem.db_path);
 	opendb->mdhim_store = mdhim_store;
 
-	_add_opendb(opendb);
+	add_opendb(opendb);
 
 out:
 	//Create the response message
@@ -612,7 +612,7 @@ int range_server_close(struct mdhim_t *md, struct mdhim_closem_t *cm, int source
 	struct mdhim_store_t *mdhim_store = NULL;
 	mdhim_open_db_t *opendb = NULL;
 
-	opendb = _find_opendb_dec_ref(cm->basem.db_path);
+	opendb = find_opendb_dec_ref(cm->basem.db_path);
 	if (opendb == NULL) {
 		/* return error??? */
 		goto out;
@@ -681,7 +681,7 @@ int range_server_put(struct mdhim_t *md, struct mdhim_putm_t *im, int source) {
 	*value_len = 0;
 
 	//Get the index referenced the message
-	opendb = _find_opendb_inc_ref(im->basem.db_path);
+	opendb = find_opendb_inc_ref(im->basem.db_path);
 	if (!opendb) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving open db: %s", 
 		     mdhim_gdata.mdhim_rank, im->basem.db_path);
@@ -734,7 +734,7 @@ int range_server_put(struct mdhim_t *md, struct mdhim_putm_t *im, int source) {
 	if (!exists && error == MDHIM_SUCCESS) {
 		update_stat(opendb, im->key, im->key_len);
 	}
-	_find_opendb_dec_ref(im->basem.db_path);
+	find_opendb_dec_ref(im->basem.db_path);
 
 	gettimeofday(&end, NULL);
 	add_timing(start, end, inserted, &mdhim_gdata, MDHIM_PUT);
@@ -803,7 +803,7 @@ int range_server_bput(struct mdhim_t *md, struct mdhim_bputm_t *bim, int source)
 	value_len = malloc(sizeof(int32_t));
 
 	//Get the index referenced the message
-	opendb = _find_opendb_inc_ref(bim->basem.db_path);
+	opendb = find_opendb_inc_ref(bim->basem.db_path);
 	if (!opendb) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for: %s", 
 		     md->mdhim_rank, bim->basem.db_path);
@@ -890,7 +890,7 @@ int range_server_bput(struct mdhim_t *md, struct mdhim_bputm_t *bim, int source)
 	gettimeofday(&end, NULL);
 	add_timing(start, end, num_put, md, MDHIM_BULK_PUT);
 
-	_find_opendb_dec_ref(bim->basem.db_path);
+	find_opendb_dec_ref(bim->basem.db_path);
  done:
 	//Create the response message
 	brm = malloc(sizeof(struct mdhim_rm_t));
@@ -930,7 +930,7 @@ int range_server_del(struct mdhim_t *md, struct mdhim_delm_t *dm, int source) {
 	//struct index_t *index;
 
 	//Get the index referenced the message
-	opendb = _find_opendb_inc_ref(dm->basem.db_path);
+	opendb = find_opendb_inc_ref(dm->basem.db_path);
 	if (!opendb) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for: %s", 
 		     md->mdhim_rank, dm->basem.db_path);
@@ -945,7 +945,7 @@ int range_server_del(struct mdhim_t *md, struct mdhim_delm_t *dm, int source) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error deleting record", 
 		     md->mdhim_rank);
 	}
-	_find_opendb_dec_ref(dm->basem.db_path);
+	find_opendb_dec_ref(dm->basem.db_path);
 
  done:
 	//Create the response message
@@ -982,7 +982,7 @@ int range_server_bdel(struct mdhim_t *md, struct mdhim_bdelm_t *bdm, int source)
 	mdhim_open_db_t *opendb = NULL;
 
 	//Get the index referenced the message
-	opendb = _find_opendb_inc_ref(bdm->basem.db_path);
+	opendb = find_opendb_inc_ref(bdm->basem.db_path);
 	if (!opendb) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for: %s", 
 		     md->mdhim_rank, bdm->basem.db_path);
@@ -1002,7 +1002,7 @@ int range_server_bdel(struct mdhim_t *md, struct mdhim_bdelm_t *bdm, int source)
 			error = ret;
 		}
 	}
-	_find_opendb_dec_ref(bdm->basem.db_path);
+	find_opendb_dec_ref(bdm->basem.db_path);
 
 done:
 	//Create the response message
@@ -1039,7 +1039,7 @@ int range_server_commit(struct mdhim_t *md, struct mdhim_basem_t *im, int source
 	mdhim_open_db_t *opendb = NULL;
 
 	//Get the index referenced the message
-	opendb = _find_opendb_inc_ref(im->db_path);
+	opendb = find_opendb_inc_ref(im->db_path);
 	if (!opendb) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for : %s", 
 		     md->mdhim_rank, im->db_path);
@@ -1054,7 +1054,7 @@ int range_server_commit(struct mdhim_t *md, struct mdhim_basem_t *im, int source
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error committing database",
 		     md->mdhim_rank);
 	}
-	_find_opendb_dec_ref(im->db_path);
+	find_opendb_dec_ref(im->db_path);
 
  done:	
 	//Create the response message
@@ -1100,7 +1100,7 @@ int range_server_bget(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int source)
 	memset(value_lens, 0, sizeof(int32_t) * bgm->num_keys);
 
 	//Get the index referenced the message
-	opendb = _find_opendb_inc_ref(bgm->basem.db_path);
+	opendb = find_opendb_inc_ref(bgm->basem.db_path);
 	if (!opendb) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for : %s", 
 		     md->mdhim_rank, bgm->basem.db_path);
@@ -1195,7 +1195,7 @@ int range_server_bget(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int source)
 
 		num_retrieved++;
 	}
-	_find_opendb_dec_ref(bgm->basem.db_path);
+	find_opendb_dec_ref(bgm->basem.db_path);
 
 	gettimeofday(&end, NULL);
 	add_timing(start, end, num_retrieved, md, MDHIM_BULK_GET);
@@ -1288,7 +1288,7 @@ int range_server_bget_op(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int sour
 	num_records = 0;
 
 	//Get the index referenced the message
-	opendb = _find_opendb_inc_ref(bgm->basem.db_path);
+	opendb = find_opendb_inc_ref(bgm->basem.db_path);
 	if (!opendb) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for id: %s", 
 		     md->mdhim_rank, bgm->basem.db_path);
@@ -1405,7 +1405,7 @@ int range_server_bget_op(struct mdhim_t *md, struct mdhim_bgetm_t *bgm, int sour
 
 respond:
 	if (inc_ref == 1) {
-		_find_opendb_dec_ref(bgm->basem.db_path);
+		find_opendb_dec_ref(bgm->basem.db_path);
 	}
 
 	gettimeofday(&end, NULL);
