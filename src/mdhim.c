@@ -24,7 +24,8 @@
  *
  */
 
-static struct mdhim_t mdhim_gdata;
+struct mdhim_t mdhim_gdata;
+static char *mdhim_log_file = "./mdhim.log";
 
 /**
  * mdhimInit
@@ -36,12 +37,12 @@ static struct mdhim_t mdhim_gdata;
 int mdhimInit(void *appComm, int num_wthreads) {
 	int ret = 0;
 	int flag, provided;
-	struct index_t *primary_index;
+	int debug_level = MLOG_DBG; /*TODO make num_wthreads and debug_level configurable */
 	MPI_Comm comm;
 
 	//Open mlog - stolen from plfs
 	ret = mlog_open((char *)"mdhim", 0,
-	        opts->debug_level, opts->debug_level, NULL, 0, MLOG_LOGPID, 0);
+	        debug_level, debug_level, mdhim_log_file, 0, MLOG_LOGPID, 0);
 
 	//Check if MPI has been initialized
 	if ((ret = MPI_Initialized(&flag)) != MPI_SUCCESS) {
@@ -70,13 +71,13 @@ int mdhimInit(void *appComm, int num_wthreads) {
 
 	if ((ret = MPI_Comm_dup(comm, &mdhim_gdata.mdhim_comm)) != MPI_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "Error while initializing the MDHIM communicator");
-		return NULL;
+		return MDHIM_ERROR;
 	}
 
 	//Get our rank in the main MDHIM communicator
 	if ((ret = MPI_Comm_rank(mdhim_gdata.mdhim_comm, &mdhim_gdata.mdhim_rank)) != MPI_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "Error getting our rank while initializing MDHIM");
-		return NULL;
+		return MDHIM_ERROR;
 	}
 
 	//Initialize mdhim_comm mutex
@@ -85,13 +86,13 @@ int mdhimInit(void *appComm, int num_wthreads) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Error while allocating memory for client", 
 		     mdhim_gdata.mdhim_rank);
-		return NULL;
+		return MDHIM_ERROR;
 	}
 
 	if ((ret = pthread_mutex_init(mdhim_gdata.mdhim_comm_lock, NULL)) != 0) {    
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Error while initializing mdhim_comm_lock", mdhim_gdata.mdhim_rank);
-		return NULL;
+		return MDHIM_ERROR;
 	}
 
 	//Get the size of the main MDHIM communicator
@@ -99,7 +100,7 @@ int mdhimInit(void *appComm, int num_wthreads) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error getting the size of the " 
 		     "comm while initializing", 
 		     mdhim_gdata.mdhim_rank);
-		return NULL;
+		return MDHIM_ERROR;
 	}
 
 	//Initialize receive msg mutex - used for receiving a message from myself
@@ -108,12 +109,12 @@ int mdhimInit(void *appComm, int num_wthreads) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Error while allocating memory for client", 
 		     mdhim_gdata.mdhim_rank);
-		return NULL;
+		return MDHIM_ERROR;
 	}
 	if ((ret = pthread_mutex_init(mdhim_gdata.receive_msg_mutex, NULL)) != 0) {    
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
-		     "Error while initializing receive queue mutex", md->mdhim_rank);
-		return NULL;
+		     "Error while initializing receive queue mutex", mdhim_gdata.mdhim_rank);
+		return MDHIM_ERROR;
 	}
 	//Initialize the receive condition variable - used for receiving a message from myself
 	mdhim_gdata.receive_msg_ready_cv = malloc(sizeof(pthread_cond_t));
@@ -121,14 +122,16 @@ int mdhimInit(void *appComm, int num_wthreads) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Error while allocating memory for client", 
 		     mdhim_gdata.mdhim_rank);
-		return NULL;
+		return MDHIM_ERROR;
 	}
 	if ((ret = pthread_cond_init(mdhim_gdata.receive_msg_ready_cv, NULL)) != 0) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Error while initializing client receive condition variable", 
-		     md->mdhim_rank);
-		return NULL;
+		     mdhim_gdata.mdhim_rank);
+		return MDHIM_ERROR;
 	}
+
+	mdhim_gdata.shutdown = 0;
 
 	//Initialize the partitioner
 	partitioner_init();
@@ -139,7 +142,7 @@ int mdhimInit(void *appComm, int num_wthreads) {
 	mdhim_gdata.receive_msg = NULL;
 	MPI_Barrier(mdhim_gdata.mdhim_comm);
 
-	return md;
+	return MDHIM_SUCCESS;
 }
 
 /**
@@ -160,7 +163,7 @@ int mdhimFinalize() {
 
 	gettimeofday(&start, NULL);
 	//Stop range server if I'm a range server
-	if (md->mdhim_rs && (ret = range_server_stop(md)) != MDHIM_SUCCESS) {
+	if (mdhim_gdata.mdhim_rs && (ret = range_server_stop(&mdhim_gdata)) != MDHIM_SUCCESS) {
 		return MDHIM_ERROR;
 	}
 
@@ -196,8 +199,6 @@ int mdhimFinalize() {
 		mdhim_gdata.mdhim_rank);
 
 	MPI_Comm_free(&mdhim_gdata.mdhim_comm);
-	MPI_Comm_free(&mdhim_gdata.mdhim_comm);
-        free(md);
 
 	//Close MLog
 	mlog_close();
@@ -205,13 +206,18 @@ int mdhimFinalize() {
 	return MDHIM_SUCCESS;
 }
 
-mdhim_db_t* mdhimOpen(struct mdhim_options_t *ops) {
+/*
+ * If user provides \a opts, then should hold it until successfully
+ * close the database.
+ */
+mdhim_db_t* mdhimOpen(struct mdhim_options_t *opts) {
 	int ret;
-	mdhim_db_t *db = NULL;
-	mdhim_rm_t *rm = NULL;
+	mdhim_db_t *mdb = NULL;
+	struct mdhim_rm_t *rm = NULL;
+	struct index_t *primary_index;
 
-	db = malloc(sizeof(mdhim_db_t));
-	if (db == NULL) {
+	mdb = malloc(sizeof(mdhim_db_t));
+	if (mdb == NULL) {
 		return NULL;
 	}
 	if (!opts) {
@@ -225,31 +231,31 @@ mdhim_db_t* mdhimOpen(struct mdhim_options_t *ops) {
                 mdhim_options_set_key_type(opts, MDHIM_BYTE_KEY);
                 mdhim_options_set_debug_level(opts, MLOG_CRIT);
 	}
+	mdb->db_opts = opts;
 
 	//Initialize the indexes and create the primary index
-	db->indexes = NULL;
+	mdb->indexes = NULL;
 
 	//Create the default remote primary index
-	primary_index = create_global_index(db, opts->rserver_factor, opts->max_recs_per_slice, 
+	primary_index = create_global_index(mdb, opts->rserver_factor, opts->max_recs_per_slice, 
 					    opts->db_type, opts->db_key_type);
 	if (!primary_index) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
 		     "Couldn't create the default index",
 		     mdhim_gdata.mdhim_rank);
+		free(mdb);
 		return NULL;
 	}
-	db->primary_index = primary_index;
+	mdb->primary_index = primary_index;
 
-	rm = _open_db(db);
+	rm = _open_db(mdb);
 	if (rm != NULL && rm->error != MDHIM_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
 		     "Couldn't open physical database",
 		     mdhim_gdata.mdhim_rank);
 		ret = MDHIM_ERROR;
-		free(db);
-		db = NULL;
 	} else {
-		ret = write_manifest(db);
+		ret = write_manifest(mdb);
 		if (ret != MDHIM_SUCCESS) {
 			mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
 				"Couldn't open physical database",
@@ -259,20 +265,20 @@ mdhim_db_t* mdhimOpen(struct mdhim_options_t *ops) {
 
 	mdhim_full_release_msg(rm);
 	if (ret != MDHIM_SUCCESS) {
-		indexes_release(db);
-		free(db);
-		db = NULL;
+		indexes_release(mdb);
+		free(mdb);
+		mdb = NULL;
 	}
 
-	return db;
+	return mdb;
 }
 
-int mdhimClose(mdhim_db_t *db) {
+int mdhimClose(mdhim_db_t *mdb) {
 	int ret = 0;
-	mdhim_rm_t *rm = NULL;
+	struct mdhim_rm_t *rm = NULL;
 
 	// send "close" command to range servers
-	rm = _close_db(db);
+	rm = _close_db(mdb);
 	if (rm != NULL && rm->error != MDHIM_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
 		     "Couldn't close physical database",
@@ -284,10 +290,10 @@ int mdhimClose(mdhim_db_t *db) {
 	mdhim_full_release_msg(rm);
 
 	// Free up memory used by indexes
-	indexes_release(db);
+	indexes_release(mdb);
 
 	// Free up memory used by db
-	free(db);
+	free(mdb);
 
 out:
 	return ret;
@@ -312,7 +318,7 @@ int mdhimCommit(struct mdhim_db *mdb, struct index_t *index) {
 		cm->index = index->id;
 		cm->index_type = index->type;
 		memset(cm->db_path, '\0', MDHIM_PATH_MAX);
-		strcpy(cm->db_path, mdb->db_opts->db_path);
+		sprintf(cm->db_path, "%s/%s", mdb->db_opts->db_path, mdb->db_opts->db_name);
 		rm = local_client_commit(cm);
 		if (!rm || rm->error) {
 			ret = MDHIM_ERROR;
@@ -523,9 +529,9 @@ struct mdhim_brm_t *_bput_secondary_keys_from_info(struct mdhim_db *mdb,
  * @param num_records  the number of records to store (i.e., the number of keys in keys array)
  * @return mdhim_brm_t * or NULL on error
  */
-struct mdhim_brm_t *mdhimBPut(struct mdhim_t *mdb, 
-			      void **primary_keys, int *primary_key_lens, 
-			      void **primary_values, int *primary_value_lens, 
+struct mdhim_brm_t *mdhimBPut(struct mdhim_db *mdb,
+			      void **primary_keys, int *primary_key_lens,
+			      void **primary_values, int *primary_value_lens,
 			      int num_records,
 			      struct secondary_bulk_info *secondary_global_info,
 			      struct secondary_bulk_info *secondary_local_info) {
@@ -675,14 +681,14 @@ struct mdhim_bgetrm_t *mdhimBGet(struct mdhim_db *mdb, struct index_t *index,
 	if (num_keys > MAX_BULK_OPS) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Too many bulk operations requested in mdhimBGet", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
 	if (!index) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - " 
 		     "Invalid index specified", 
-		     md->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return NULL;
 	}
 
@@ -733,7 +739,7 @@ struct mdhim_bgetrm_t *mdhimBGet(struct mdhim_db *mdb, struct index_t *index,
 			bgrm_head = lbgrm;
 		}
 
-		primary_index = get_index(md, index->primary_id);	
+		primary_index = get_index(mdb, index->primary_id);	
 		//Get the primary keys' values
 		bgrm_head = _bget_records(mdb, primary_index,
 					  primary_keys, primary_key_lens, 

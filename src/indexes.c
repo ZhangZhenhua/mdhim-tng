@@ -39,11 +39,11 @@ int open_manifest(mdhim_db_t *mdb, struct index_t *index, int flags) {
 	char path[PATH_MAX];
 
 	sprintf(path, "%s%d_%d_%d", mdb->db_opts->manifest_path, index->type, 
-		index->id, mdb->mdhim_rank);
+		index->id, mdhim_gdata.mdhim_rank);
 	fd = open(path, flags, 00600);
 	if (fd < 0) {
 		mlog(MDHIM_SERVER_DBG, "Rank: %d - Error opening manifest file", 
-		     mdb->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 	}
 	
 	return fd;
@@ -66,7 +66,7 @@ int write_manifest(mdhim_db_t *mdb) {
 	index = mdb->primary_index;
 	if ((fd = open_manifest(mdb, index, O_RDWR | O_CREAT | O_EXCL)) < 0) {
 		mlog(MDHIM_SERVER_INFO, "Rank: %d - manifest file existed",
-		     mdb->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		/* TODO note, if mainfest creator create the file but not
 		 * yet finish writing to it, and another reader comes in,
 		 * then it's a race.
@@ -80,11 +80,11 @@ int write_manifest(mdhim_db_t *mdb) {
 	manifest.db_type = index->db_type;
 	manifest.rangesrv_factor = index->range_server_factor;
 	manifest.slice_size = index->mdhim_max_recs_per_slice;
-	manifest.num_nodes = mdb->mdhim_comm_size;
+	manifest.num_nodes = mdhim_gdata.mdhim_comm_size;
 
 	if ((ret = write(fd, &manifest, sizeof(manifest))) < 0) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error writing manifest file", 
-		     mdb->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return MDHIM_ERROR;
 	}
 
@@ -106,52 +106,52 @@ int read_manifest(mdhim_db_t *mdb, struct index_t *index) {
 
 	if ((fd = open_manifest(mdb, index, O_RDWR)) < 0) {
 		mlog(MDHIM_SERVER_DBG, "Rank: %d - Couldn't open manifest file",
-		     mdb->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return MDHIM_SUCCESS;
 	}
 
 	if ((ret = read(fd, &manifest, sizeof(manifest))) < 0) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Couldn't read manifest file", 
-		     mdb->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		return MDHIM_ERROR;
 	}
 
 	ret = MDHIM_SUCCESS;
 	mlog(MDHIM_SERVER_DBG, "Rank: %d - Manifest contents - \nnum_rangesrvs: %d, key_type: %d, " 
 	     "db_type: %d, rs_factor: %u, slice_size: %lu, num_nodes: %d",
-	     mdb->mdhim_rank, manifest.num_rangesrvs, manifest.key_type, manifest.db_type, 
+	     mdhim_gdata.mdhim_rank, manifest.num_rangesrvs, manifest.key_type, manifest.db_type, 
 	     manifest.rangesrv_factor, manifest.slice_size, manifest.num_nodes);
 
 	//Check that the manifest and the current config match
 	if (manifest.key_type != index->key_type) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - The key type in the manifest file" 
 		     " doesn't match the current key type",
-		     mdb->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		ret = MDHIM_ERROR;
 	}
 	if (manifest.db_type != index->db_type) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - The database type in the manifest file" 
 		     " doesn't match the current database type",
-		     mdb->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		ret = MDHIM_ERROR;
 	}
 
 	if (manifest.rangesrv_factor != index->range_server_factor) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - The range server factor in the manifest file" 
 		     " doesn't match the current range server factor",
-		     mdb->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		ret = MDHIM_ERROR;
 	}
 	if (manifest.slice_size != index->mdhim_max_recs_per_slice) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - The slice size in the manifest file" 
 		     " doesn't match the current slice size",
-		     mdb->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		ret = MDHIM_ERROR;
 	}
-	if (manifest.num_nodes != mdb->mdhim_comm_size) {
+	if (manifest.num_nodes != mdhim_gdata.mdhim_comm_size) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - The number of nodes in this MDHIM instance" 
 		     " doesn't match the number used previously",
-		     mdb->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 		ret = MDHIM_ERROR;
 	}
 
@@ -347,7 +347,6 @@ done:
 
 /**
  * create_global_index
- * Collective call that creates a global index.
  * A global index has global ordering.  This means that range servers serve mutually exclusive keys
  * and keys can be retrieved across servers in order.  Retrieving a key will query only one range
  * server.
@@ -385,7 +384,7 @@ struct index_t *create_global_index(mdhim_db_t *db, int server_factor,
 	gi->key_type = key_type;
 	gi->db_type = db_type;
 	gi->myinfo.rangesrv_num = 0;
-	gi->myinfo.rank = db->mdhim_rank;
+	gi->myinfo.rank = mdhim_gdata.mdhim_rank;
 	gi->primary_id = gi->type == SECONDARY_INDEX ? db->primary_index->id : -1;
 	gi->stats = NULL;
 
@@ -396,20 +395,20 @@ struct index_t *create_global_index(mdhim_db_t *db, int server_factor,
 	ret = get_rangesrvs(db, gi);
 	if (ret != MDHIM_SUCCESS) {
 		mlog(MDHIM_CLIENT_CRIT, "Rank: %d - Couldn't get the range server list", 
-		     db->mdhim_rank);
+		     mdhim_gdata.mdhim_rank);
 	}
 
 	//Add it to the hash table
 	HASH_ADD_INT(db->indexes, id, gi);
 
 	//Test if I'm a range server and get the range server number
-	if ((rangesrv_num = is_range_server(db, db->mdhim_rank, gi)) == MDHIM_ERROR) {	
+	if ((rangesrv_num = is_range_server(db, mdhim_gdata.mdhim_rank, gi)) == MDHIM_ERROR) {	
 		goto done;
 	}
 
 	if (rangesrv_num > 0) {
 		//Populate my range server info for this index
-		gi->myinfo.rank = db->mdhim_rank;
+		gi->myinfo.rank = mdhim_gdata.mdhim_rank;
 		gi->myinfo.rangesrv_num = rangesrv_num;
 	}
 
@@ -430,7 +429,7 @@ int get_rangesrvs(mdhim_db_t *db, struct index_t *index) {
 	int i;
 
 	//Iterate through the ranks to determine which ones are range servers
-	for (i = 0; i < db->mdhim_comm_size; i++) {
+	for (i = 0; i < mdhim_gdata.mdhim_comm_size; i++) {
 		//Test if the rank is range server for this index
 		if ((rangesrv_num = is_range_server(db, i, index)) == MDHIM_ERROR) {
 			continue;
@@ -471,7 +470,7 @@ uint32_t is_range_server(mdhim_db_t *db, int rank, struct index_t *index) {
 	//int ret;
 	uint64_t rangesrv_num = 0;
 
-	size = db->mdhim_comm_size;
+	size = mdhim_gdata.mdhim_comm_size;
 
 	//If a local index, check to see if the rank is a range server for the primary index
 	if (index->type == LOCAL_INDEX) {
@@ -654,10 +653,10 @@ void indexes_release(mdhim_db_t *md) {
 			pthread_rwlock_destroy(cur_indx->mdhim_store->mdhim_store_stats_lock);
 			free(cur_indx->mdhim_store->mdhim_store_stats_lock);
 			free(cur_indx->mdhim_store);
-#endif
 			if (cur_indx->type != LOCAL_INDEX) {
 				MPI_Comm_free(&cur_indx->rs_comm);
 			}
+#endif
 		}
 	
 		

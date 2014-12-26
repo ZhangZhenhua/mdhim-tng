@@ -400,20 +400,31 @@ work_item *get_work(struct mdhim_t *md) {
 	return item;
 }
 
+void _build_db_path(char *path, char *client_path) {
+	memset(path, '\0', MDHIM_PATH_MAX);
+	sprintf(path, "%s-%d", client_path, mdhim_gdata.mdhim_rank);
+}
+
 /* XXX add lock to protect this hash table for the open/close
  * race. Well behavied applications should not have such issues. */
 int add_opendb(mdhim_open_db_t *opendb) {
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
-	HASH_ADD_STR(opendbs, db_path, opendb);
+	if (HASH_COUNT(mdhim_gdata.mdhim_rs->opendbs) == 0) {
+		HASH_ADD_STR(mdhim_gdata.mdhim_rs->opendbs, db_path, opendb);
+	} else {
+		HASH_ADD_STR(opendbs, db_path, opendb);
+	}
 	return 0;
 }
 
 int del_opendb(char *path) {
+	char db_path[MDHIM_PATH_MAX];
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
-	HASH_FIND_STR(opendbs, path, outdb);
+	_build_db_path(db_path, path);
+	HASH_FIND_STR(opendbs, db_path, outdb);
 	if (outdb != NULL) {
 		HASH_DEL(opendbs, outdb);
 		free(outdb);
@@ -422,20 +433,24 @@ int del_opendb(char *path) {
 }
 
 mdhim_open_db_t* find_opendb(char *path) {
+	char db_path[MDHIM_PATH_MAX];
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
-	HASH_FIND_STR(opendbs, path, outdb);
+	_build_db_path(db_path, path);
+	HASH_FIND_STR(opendbs, db_path, outdb);
 
 	return outdb;
 }
 
 /* increase refcount if finding opendb in hash */
 mdhim_open_db_t* find_opendb_inc_ref(char *path) {
+	char db_path[MDHIM_PATH_MAX];
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
-	HASH_FIND_STR(opendbs, path, outdb);
+	_build_db_path(db_path, path);
+	HASH_FIND_STR(opendbs, db_path, outdb);
 	if (outdb != NULL) outdb->ref ++;
 
 	return outdb;
@@ -443,10 +458,12 @@ mdhim_open_db_t* find_opendb_inc_ref(char *path) {
 
 /* decrease refcount if finding opendb in hash */
 mdhim_open_db_t* find_opendb_dec_ref(char *path) {
+	char db_path[MDHIM_PATH_MAX];
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
-	HASH_FIND_STR(opendbs, path, outdb);
+	_build_db_path(db_path, path);
+	HASH_FIND_STR(opendbs, db_path, outdb);
 	if (outdb != NULL && outdb->ref > 0) {
 		outdb->ref --;
 		if (outdb->ref == 0) {
@@ -543,6 +560,8 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 	struct mdhim_store_t *mdhim_store = NULL;
 	mdhim_open_db_t *opendb = NULL;
 
+	mlog(MDHIM_SERVER_INFO, "MDHIM Rank %d: finding db %s.",
+			mdhim_gdata.mdhim_rank, om->basem.db_path);
 	opendb = find_opendb_inc_ref(om->basem.db_path);
 	if (opendb != NULL) {
 		goto out;
@@ -555,12 +574,14 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 		ret = MDHIM_ERROR;
 		goto out;
 	}
+	memset(opendb, '\0', sizeof(mdhim_open_db_t));
 
 	/* initialize mdhim_store */
 	mdhim_store = mdhim_db_init(om->db_type);
+	_build_db_path(opendb->db_path, om->basem.db_path);
 
 	ret = mdhim_store->open(&mdhim_store->db_handle, &mdhim_store->db_stats,
-				om->basem.db_path, flags, om->db_key_type,
+				opendb->db_path, flags, om->db_key_type,
 				NULL /* letting opts = NULL*/);
 	if (ret != 0) {
 		mlog(MDHIM_SERVER_CRIT, "MDHIM Rank %d: Error while opening "
@@ -577,10 +598,11 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 	opendb->db_value_append = om->db_value_append;
 	opendb->debug_level = om->debug_level;
 	opendb->max_recs_per_slice = om->max_recs_per_slice;
-	strcpy(opendb->db_path, om->basem.db_path);
 	opendb->mdhim_store = mdhim_store;
 
 	add_opendb(opendb);
+	mlog(MDHIM_SERVER_DBG, "MDHIM Rank %d: adding %s to range svr opendb hash table.",
+			mdhim_gdata.mdhim_rank, opendb->db_path);
 
 out:
 	//Create the response message
@@ -594,6 +616,7 @@ out:
 
 	//Send response
 	ret = send_locally_or_remote(md, source, rm);
+
 	return ret;
 }
 
@@ -646,6 +669,7 @@ out:
 
 	//Send response
 	ret = send_locally_or_remote(md, source, rm);
+
 	return ret;
 }
 

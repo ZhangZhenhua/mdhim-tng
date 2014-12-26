@@ -38,8 +38,8 @@ struct mdhim_brm_t *client_open(struct mdhim_openm_t **openmsg_list,
 		return NULL;
 	}
 
-	rm_list = malloc(sizeof(struct mdhim_rm_t *) * num_range_svrs);
-	memset(rm_list, 0, sizeof(struct mdhim_rm_t *) * num_range_svrs);
+	rm_list = malloc(sizeof(struct mdhim_rm_t *) * num_srvs);
+	memset(rm_list, 0, sizeof(struct mdhim_rm_t *) * num_srvs);
 	return_code = receive_all_client_responses(&mdhim_gdata, srvs, num_srvs,
 						  (void ***) &rm_list);
 	// If the receives did not succeed then log the error code and return MDHIM_ERROR
@@ -49,7 +49,7 @@ struct mdhim_brm_t *client_open(struct mdhim_openm_t **openmsg_list,
 	}
 
 	brm_head = brm_tail = NULL;
-	for (i = 0; i < num_range_svrs; i++) {
+	for (i = 0; i < num_srvs; i++) {
 		rm = rm_list[i];
 		if (!rm) {
 		  mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "

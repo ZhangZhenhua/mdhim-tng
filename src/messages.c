@@ -391,7 +391,7 @@ int receive_rangesrv_work(struct mdhim_t *md, int *src, void **message) {
 	free(bm);
         
         // Checks for valid message, if error inform and ignore message
-        if (msg_size==0 || mtype<MDHIM_PUT || mtype>MDHIM_COMMIT) {
+        if (msg_size==0 || mtype<MDHIM_PUT || mtype>MDHIM_CLOSE) {
             mlog(MDHIM_SERVER_CRIT, "Rank: %d - Got empty/invalid message in receive_rangesrv_work.", 
 		     md->mdhim_rank);
             free(recvbuf);
@@ -413,6 +413,12 @@ int receive_rangesrv_work(struct mdhim_t *md, int *src, void **message) {
 		break;
 	case MDHIM_BULK_DEL:
 		return_code = unpack_bdel_message(md, recvbuf, msg_size, message);			
+		break;
+	case MDHIM_OPEN:
+		return_code = unpack_open_message(md, recvbuf, msg_size, message);
+		break;
+	case MDHIM_CLOSE:
+		return_code = unpack_close_message(md, recvbuf, msg_size, message);
 		break;
 	case MDHIM_COMMIT:
 		ret = MDHIM_COMMIT;
@@ -823,7 +829,7 @@ int unpack_open_message(struct mdhim_t *md, void *message, int mesg_size,  void 
 	int mesg_idx = 0;  // Variable for incremental unpack
         struct mdhim_openm_t *om = NULL;
 
-        if ((*((struct mdhim_openm_t **) om) = malloc(sizeof(struct mdhim_openm_t))) == NULL) {
+        if ((*((struct mdhim_openm_t **) openm) = malloc(sizeof(struct mdhim_openm_t))) == NULL) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to allocate "
                      "memory to unpack open message.", md->mdhim_rank);
 		return MDHIM_ERROR;
@@ -892,7 +898,7 @@ int unpack_close_message(struct mdhim_t *md, void *message, int mesg_size,  void
 	int mesg_idx = 0;  // Variable for incremental unpack
         struct mdhim_closem_t *cm = NULL;
 
-        if ((*((struct mdhim_closem_t **) cm) = malloc(sizeof(struct mdhim_closem_t))) == NULL) {
+        if ((*((struct mdhim_closem_t **) closem) = malloc(sizeof(struct mdhim_closem_t))) == NULL) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to allocate "
                      "memory to unpack close message.", md->mdhim_rank);
 		return MDHIM_ERROR;

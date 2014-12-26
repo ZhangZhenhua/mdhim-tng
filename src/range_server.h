@@ -59,7 +59,7 @@ typedef struct mdhim_rs_t {
 				  (partially for fully) by this range server */
 	mdhim_open_db_t *opendbs; /* hash tables */
 	//Records seconds spent on putting records
-	long double put_time; 
+	long double put_time;
 	//Records seconds spend on getting records
 	long double get_time;
 	long num_put;

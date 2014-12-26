@@ -37,6 +37,56 @@ static void *get_msg_self(struct mdhim_t *md) {
 	return msg;
 }
 
+struct mdhim_rm_t *local_client_open(struct mdhim_openm_t *om) {
+	int ret;
+	struct mdhim_t *md = &mdhim_gdata;
+	struct mdhim_rm_t *rm;
+	work_item *item;
+
+	if ((item = malloc(sizeof(work_item))) == NULL) {
+		mlog(MDHIM_CLIENT_CRIT, "Error while allocating memory for client");
+		return NULL;
+	}
+
+	memset(item, 0, sizeof(work_item));
+	item->message = (void *)om;
+	item->source = md->mdhim_rank;
+	if ((ret = range_server_add_work(md, item)) != MDHIM_SUCCESS) {
+		mlog(MDHIM_CLIENT_CRIT, "Error adding work to range server in local_client_open");
+		return NULL;
+	}
+	
+	rm = (struct mdhim_rm_t *) get_msg_self(md);
+	// Return response
+
+	return rm;
+}
+
+struct mdhim_rm_t *local_client_close(struct mdhim_closem_t *cm) {
+	int ret;
+	struct mdhim_t *md = &mdhim_gdata;
+	struct mdhim_rm_t *rm;
+	work_item *item;
+
+	if ((item = malloc(sizeof(work_item))) == NULL) {
+		mlog(MDHIM_CLIENT_CRIT, "Error while allocating memory for client");
+		return NULL;
+	}
+
+	memset(item, 0, sizeof(work_item));
+	item->message = (void *)cm;
+	item->source = md->mdhim_rank;
+	if ((ret = range_server_add_work(md, item)) != MDHIM_SUCCESS) {
+		mlog(MDHIM_CLIENT_CRIT, "Error adding work to range server in local_client_close");
+		return NULL;
+	}
+	
+	rm = (struct mdhim_rm_t *) get_msg_self(md);
+	// Return response
+
+	return rm;
+}
+
 /**
  * Send put to range server
  *
@@ -250,29 +300,4 @@ struct mdhim_rm_t *local_client_bdelete(struct mdhim_bdelm_t *bdm) {
 
 	// Return response
 	return brm;
-}
-
-/**
- * Send close to range server
- *
- * @param md main MDHIM struct
- * @param cm pointer to close message to be inserted into the range server's work queue
- */
-void local_client_close(struct mdhim_t *md, struct mdhim_basem_t *cm) {
-	int ret;
-	work_item *item;
-
-	if ((item = malloc(sizeof(work_item))) == NULL) {
-		mlog(MDHIM_CLIENT_CRIT, "Error while allocating memory for client");
-		return;
-	}
-
-	item->message = (void *)cm;
-	item->source = md->mdhim_rank;
-	if ((ret = range_server_add_work(md, item)) != MDHIM_SUCCESS) {
-		mlog(MDHIM_CLIENT_CRIT, "Error adding work to range server in local_client_put");
-		return;
-	}
-	
-	return;
 }
