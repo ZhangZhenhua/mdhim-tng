@@ -157,6 +157,80 @@ struct mdhim_brm_t *client_close(struct mdhim_closem_t **closemsg_list,
 	return brm_head;
 }
 
+struct mdhim_brm_t *client_commit(struct mdhim_commitm_t **commitmsg_list,
+				int num_range_svrs) {
+	struct mdhim_brm_t *brm_head, *brm_tail, *brm;
+	struct mdhim_rm_t **rm_list, *rm;
+	int i, return_code, num_srvs = 0, *srvs;
+
+	srvs = malloc(sizeof(int) * num_range_svrs);
+	for (i = 0; i < num_range_svrs; i++) {
+		if (!commitmsg_list[i]) {
+			continue;
+		}
+
+		srvs[num_srvs] = commitmsg_list[i]->basem.server_rank;
+		num_srvs++;
+	}
+
+	if (!num_srvs) {
+	  free(srvs);
+	  return NULL;
+	}
+
+	return_code = send_all_rangesrv_work(&mdhim_gdata, (void **)commitmsg_list, num_range_svrs);
+	// If the send did not succeed then log the error code and return MDHIM_ERROR
+	if (return_code != MDHIM_SUCCESS) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: %d from server while sending "
+		     "commit request",  mdhim_gdata.mdhim_rank, return_code);
+		return NULL;
+	}
+
+	rm_list = malloc(sizeof(struct mdhim_rm_t *) * num_range_svrs);
+	memset(rm_list, 0, sizeof(struct mdhim_rm_t *) * num_range_svrs);
+	return_code = receive_all_client_responses(&mdhim_gdata, srvs, num_srvs,
+						  (void ***) &rm_list);
+	// If the receives did not succeed then log the error code and return MDHIM_ERROR
+	if (return_code != MDHIM_SUCCESS) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: %d from server while receiving "
+		     "commit requests",  mdhim_gdata.mdhim_rank, return_code);
+	}
+
+	brm_head = brm_tail = NULL;
+	for (i = 0; i < num_range_svrs; i++) {
+		rm = rm_list[i];
+		if (!rm) {
+		  mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
+		       "Error: did not receive a response message in client_commit",
+		       mdhim_gdata.mdhim_rank);
+		  //Skip this as the message doesn't exist
+		  continue;
+		}
+
+		brm = malloc(sizeof(struct mdhim_brm_t));
+		brm->error = rm->error;
+		brm->basem.mtype = rm->basem.mtype;
+		brm->basem.server_rank = rm->basem.server_rank;
+		free(rm);
+
+		//Build the linked list to return
+		brm->next = NULL;
+		if (!brm_head) {
+			brm_head = brm;
+			brm_tail = brm;
+		} else {
+			brm_tail->next = brm;
+			brm_tail = brm;
+		}
+	}
+
+	free(rm_list);
+	free(srvs);
+
+	// Return response message
+	return brm_head;
+}
+
 /**
  * Send put to range server
  *

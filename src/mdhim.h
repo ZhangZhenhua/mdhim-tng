@@ -73,8 +73,6 @@ struct mdhim_db {
 
         //Options for DB creation
         mdhim_options_t *db_opts;
-
-	rangesrv_info *rs_info;
 };
 typedef struct mdhim_db mdhim_db_t;
 
@@ -100,7 +98,7 @@ int mdhimInit(void *appComm, int num_wthreads);
 int mdhimFinalize();
 mdhim_db_t *mdhimOpen(struct mdhim_options_t *opts);
 int mdhimClose(mdhim_db_t *mdb);
-int mdhimCommit(struct mdhim_db *mdb, struct index_t *index);
+int mdhimCommit(struct mdhim_db *mdb);
 int mdhimStatFlush(struct mdhim_db *mdb, struct index_t *index);
 struct mdhim_brm_t *mdhimPut(struct mdhim_db *mdb,
 			     void *key, int key_len,  

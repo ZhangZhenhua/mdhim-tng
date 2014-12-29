@@ -13,6 +13,8 @@ struct mdhim_brm_t *client_open(struct mdhim_openm_t **openmsg_list,
 				int num_range_svrs);
 struct mdhim_brm_t *client_close(struct mdhim_closem_t **closemsg_list,
 				int num_range_svrs);
+struct mdhim_brm_t *client_commit(struct mdhim_commitm_t **commitmsg_list,
+				int num_range_svrs);
 struct mdhim_rm_t *client_put(struct mdhim_putm_t *pm);
 struct mdhim_brm_t *client_bput(struct index_t *index,
 				struct mdhim_bputm_t **bpm_list);

@@ -170,6 +170,80 @@ struct mdhim_rm_t *_close_db(struct mdhim_db *db) {
 	return rm;
 }
 
+struct mdhim_rm_t *_commit_db(struct mdhim_db *db) {
+	struct mdhim_rm_t *rm = NULL;
+	struct mdhim_brm_t *brm = NULL, *rm_itr = NULL, *lbrm = NULL;
+	struct mdhim_commitm_t *commitmsg = NULL, **commitmsg_list = NULL;
+	struct mdhim_commitm_t localmsg;
+	struct index_t *index = NULL;
+	mdhim_options_t *opts = NULL;
+	int i, j, ret, num_range_svrs, error = 0;
+
+	opts = db->db_opts;
+	index = db->primary_index;
+	num_range_svrs = get_num_range_servers(opts->rserver_factor);
+
+	commitmsg_list = malloc(sizeof(struct mdhim_commitm_t*) * num_range_svrs);
+	for (i = 0; i < num_range_svrs; i ++) {
+		commitmsg_list[i] = NULL;
+	}
+	memset(&localmsg, '\0', sizeof(struct mdhim_commitm_t));
+
+	for (i = 0, j = 0; i < mdhim_gdata.mdhim_comm_size; i ++) {
+		ret = is_range_server(db, i, index);
+		if (ret == 0) { /* not a range svr */
+			continue;
+		}
+		if (i == mdhim_gdata.mdhim_rank) {
+			localmsg.basem.mtype = MDHIM_CLOSE;
+			localmsg.basem.server_rank = i;
+			memset(localmsg.basem.db_path, '\0', MDHIM_PATH_MAX);
+			sprintf(localmsg.basem.db_path, "%s/%s", opts->db_path,opts->db_name);
+			continue;
+		}
+
+		commitmsg = malloc(sizeof(struct mdhim_commitm_t));
+		if (commitmsg == NULL) {
+			/* TODO add error handling */
+			return NULL;
+		}
+		commitmsg->basem.mtype = MDHIM_COMMIT;
+		commitmsg->basem.server_rank = i;
+		memset(commitmsg->basem.db_path, '\0', MDHIM_PATH_MAX);
+		sprintf(commitmsg->basem.db_path, "%s/%s", opts->db_path, opts->db_name);
+		commitmsg_list[j++] = commitmsg;
+	}
+
+	brm = client_commit(commitmsg_list, num_range_svrs);
+	if (localmsg.basem.mtype == MDHIM_COMMIT) {
+		rm = local_client_commit(&localmsg);
+                if (rm) {
+			lbrm = _create_brm(rm);
+                        lbrm->next = brm;
+                        brm = lbrm;
+                        free(rm);
+                }
+	}
+
+	/* check \brm and turn it into \rm */
+	rm_itr = brm;
+	while (rm_itr) {
+		error = rm_itr->error;
+		if (error) {
+			break;
+		}
+		rm_itr = rm_itr->next;
+	}
+
+	rm = malloc(sizeof(struct mdhim_rm_t));
+	if (rm_itr != NULL) {
+		rm->basem.server_rank = rm_itr->basem.server_rank;
+	}
+	rm->error = error;
+	mdhim_full_release_msg(brm);
+	return rm;
+}
+
 struct mdhim_rm_t *_put_record(struct mdhim_db *mdb, struct index_t *index, 
 			       void *key, int key_len, 
 			       void *value, int value_len) {

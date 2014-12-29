@@ -216,7 +216,7 @@ struct mdhim_bgetrm_t *local_client_bget_op(struct mdhim_t *md, struct mdhim_get
  * @param cm pointer to put message to be inserted into the range server's work queue
  * @return return_message structure with ->error = MDHIM_SUCCESS or MDHIM_ERROR
  */
-struct mdhim_rm_t *local_client_commit(struct mdhim_basem_t *cm) {
+struct mdhim_rm_t *local_client_commit(struct mdhim_commitm_t *cm) {
 	int ret;
 	struct mdhim_rm_t *rm;
 	work_item *item;

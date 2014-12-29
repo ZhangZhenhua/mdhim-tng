@@ -1056,17 +1056,17 @@ done:
  * @param source    source of the message
  * @return          MDHIM_SUCCESS or MDHIM_ERROR on error
  */
-int range_server_commit(struct mdhim_t *md, struct mdhim_basem_t *im, int source) {
+int range_server_commit(struct mdhim_t *md, struct mdhim_commitm_t *cm, int source) {
 	int ret;
 	struct mdhim_rm_t *rm;
 	//struct index_t *index;
 	mdhim_open_db_t *opendb = NULL;
 
 	//Get the index referenced the message
-	opendb = find_opendb_inc_ref(im->db_path);
+	opendb = find_opendb_inc_ref(cm->basem.db_path);
 	if (!opendb) {
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error retrieving opendb for : %s", 
-		     md->mdhim_rank, im->db_path);
+		     md->mdhim_rank, cm->basem.db_path);
 		ret = MDHIM_ERROR;
 		goto done;
 	}
@@ -1078,7 +1078,7 @@ int range_server_commit(struct mdhim_t *md, struct mdhim_basem_t *im, int source
 		mlog(MDHIM_SERVER_CRIT, "Rank: %d - Error committing database",
 		     md->mdhim_rank);
 	}
-	find_opendb_dec_ref(im->db_path);
+	find_opendb_dec_ref(cm->basem.db_path);
 
  done:	
 	//Create the response message
@@ -1092,7 +1092,7 @@ int range_server_commit(struct mdhim_t *md, struct mdhim_basem_t *im, int source
 
 	//Send response
 	ret = send_locally_or_remote(md, source, rm);
-	free(im);
+	free(cm);
 
 	return MDHIM_SUCCESS;
 }

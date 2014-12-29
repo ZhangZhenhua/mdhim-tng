@@ -156,8 +156,12 @@ struct mdhim_closem_t {
 	mdhim_basem_t basem;
 	int db_type;
 	int db_key_type;
-	char db_path[MDHIM_PATH_MAX]; /* db_path+name */
 	/* not using user/passwd etc for now. */
+};
+
+/* commit database message */
+struct mdhim_commitm_t {
+	mdhim_basem_t basem;
 };
 
 /* Range server info message */

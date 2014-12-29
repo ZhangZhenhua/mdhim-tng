@@ -305,34 +305,19 @@ out:
  * @param mdb MDHIM database struct
  * @return MDHIM_SUCCESS or MDHIM_ERROR on error
  */
-int mdhimCommit(struct mdhim_db *mdb, struct index_t *index) {
-	int ret = MDHIM_SUCCESS;
-	struct mdhim_basem_t *cm;
+int mdhimCommit(struct mdhim_db *mdb) {
+	int ret = 0;
 	struct mdhim_rm_t *rm = NULL;
 
-	//MPI_Barrier(md->mdhim_client_comm);
-	//If I'm a range server, send a commit message to myself
-	if (im_range_server(index)) {
-		cm = malloc(sizeof(struct mdhim_basem_t));
-		cm->mtype = MDHIM_COMMIT;
-		cm->index = index->id;
-		cm->index_type = index->type;
-		memset(cm->db_path, '\0', MDHIM_PATH_MAX);
-		sprintf(cm->db_path, "%s/%s", mdb->db_opts->db_path, mdb->db_opts->db_name);
-		rm = local_client_commit(cm);
-		if (!rm || rm->error) {
-			ret = MDHIM_ERROR;
-			mlog(MDHIM_SERVER_CRIT, "MDHIM Rank: %d - "
-			     "Error while committing database in mdhimCommit",
-			     mdhim_gdata.mdhim_rank);
-		}
-
-		if (rm) {
-			free(rm);
-		}
+	// send "commit" command to range servers
+	rm = _commit_db(mdb);
+	if (rm != NULL && rm->error != MDHIM_SUCCESS) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - "
+		     "Couldn't commit physical database",
+		     mdhim_gdata.mdhim_rank);
+		ret = rm->error;
 	}
-
-	//MPI_Barrier(md->mdhim_client_comm);
+	mdhim_full_release_msg(rm);
 
 	return ret;
 }

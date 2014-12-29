@@ -6,6 +6,7 @@
 struct mdhim_db;
 struct mdhim_rm_t *_open_db(struct mdhim_db *db);
 struct mdhim_rm_t *_close_db(struct mdhim_db *db);
+struct mdhim_rm_t *_commit_db(struct mdhim_db *db);
 struct mdhim_rm_t *_put_record(struct mdhim_db *mdb, struct index_t *index,
 			       void *key, int key_len,
 			       void *value, int value_len);
