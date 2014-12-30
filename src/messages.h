@@ -210,6 +210,9 @@ int unpack_open_message(struct mdhim_t *md, void *message, int mesg_size,  void 
 int pack_close_message(struct mdhim_t *md, struct mdhim_closem_t *cm, void **sendbuf, int *sendsize);
 int unpack_close_message(struct mdhim_t *md, void *message, int mesg_size,  void **closem);
 
+int pack_commit_message(struct mdhim_t *md, struct mdhim_commitm_t *cm, void **sendbuf, int *sendsize);
+int unpack_commit_message(struct mdhim_t *md, void *message, int mesg_size,  void **commitm);
+
 int pack_put_message(struct mdhim_t *md, struct mdhim_putm_t *pm, void **sendbuf, int *sendsize);
 int pack_bput_message(struct mdhim_t *md, struct mdhim_bputm_t *bpm, void **sendbuf, int *sendsize);
 int unpack_put_message(struct mdhim_t *md, void *message, int mesg_size, void **pm);

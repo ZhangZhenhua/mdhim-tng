@@ -182,6 +182,10 @@ int send_all_rangesrv_work(struct mdhim_t *md, void **messages, int num_srvs) {
 			return_code = pack_close_message(md, (struct mdhim_closem_t*)mesg, &sendbuf,
 							&sendsize);
 			break;
+		case MDHIM_COMMIT:
+			return_code = pack_commit_message(md, (struct mdhim_commitm_t*)mesg, &sendbuf,
+							 &sendsize);
+			break;
 		default:
 			break;
 		}
@@ -421,7 +425,7 @@ int receive_rangesrv_work(struct mdhim_t *md, int *src, void **message) {
 		return_code = unpack_close_message(md, recvbuf, msg_size, message);
 		break;
 	case MDHIM_COMMIT:
-		ret = MDHIM_COMMIT;
+		return_code = unpack_commit_message(md, recvbuf, msg_size, message);
 		break;
 	case MDHIM_FINALIZE:
 		ret = MDHIM_FINALIZE;
@@ -914,6 +918,75 @@ int unpack_close_message(struct mdhim_t *md, void *message, int mesg_size,  void
 	if ( return_code != MPI_SUCCESS ) {
 		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to unpack "
                      "the close message.", md->mdhim_rank);
+		return MDHIM_ERROR;
+        }
+
+	return MDHIM_SUCCESS;
+}
+
+int pack_commit_message(struct mdhim_t *md, struct mdhim_commitm_t *cm,
+		       void **sendbuf, int *sendsize) {
+	int return_code = MPI_SUCCESS;  // MPI_SUCCESS = 0
+        int64_t m_size = sizeof(struct mdhim_commitm_t); // Generous variable for size calculation
+        int mesg_size;  // Variable to be used as parameter for MPI_pack of safe size
+	int mesg_idx = 0;  // Variable for incremental pack
+        void *outbuf;
+
+        if (m_size > MDHIM_MAX_MSG_SIZE) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: commit message too large."
+                     " Commit is over Maximum size allowed of %d.",
+		     md->mdhim_rank, MDHIM_MAX_MSG_SIZE);
+		return MDHIM_ERROR;
+        }
+
+	//Set output variable for the size to send
+	mesg_size = (int) m_size;
+        *sendsize = mesg_size;
+	cm->basem.size = mesg_size;
+
+        // Is the computed message size of a safe value? (less than a max message size?)
+        if ((*sendbuf = malloc(mesg_size * sizeof(char))) == NULL) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to allocate "
+                     "memory to pack commit message.", md->mdhim_rank);
+		return MDHIM_ERROR;
+        }
+
+	outbuf = *sendbuf;
+        // pack the message first with the structure and then followed by key and data values.
+	return_code = MPI_Pack(cm, sizeof(struct mdhim_commitm_t), MPI_CHAR, outbuf, mesg_size, 
+			       &mesg_idx, md->mdhim_comm);
+
+	// If the pack did not succeed then log the error and return the error code
+	if ( return_code != MPI_SUCCESS ) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to pack "
+                     "the commit message.", md->mdhim_rank);
+		return MDHIM_ERROR;
+        }
+
+	return MDHIM_SUCCESS;
+}
+
+int unpack_commit_message(struct mdhim_t *md, void *message, int mesg_size,  void **commitm) {
+	int return_code = MPI_SUCCESS;  // MPI_SUCCESS = 0
+	int mesg_idx = 0;  // Variable for incremental unpack
+        struct mdhim_commitm_t *cm = NULL;
+
+        if ((*((struct mdhim_commitm_t **) commitm) = malloc(sizeof(struct mdhim_commitm_t))) == NULL) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to allocate "
+                     "memory to unpack commit message.", md->mdhim_rank);
+		return MDHIM_ERROR;
+        }
+
+	cm = *((struct mdhim_commitm_t **) commitm);
+        // Unpack the message first with the structure and then followed by key and data values.
+        return_code = MPI_Unpack(message, mesg_size, &mesg_idx, cm,
+				 sizeof(struct mdhim_commitm_t), MPI_CHAR,
+				 md->mdhim_comm);
+
+	// If the unpack did not succeed then log the error and return the error code
+	if ( return_code != MPI_SUCCESS ) {
+		mlog(MDHIM_CLIENT_CRIT, "MDHIM Rank: %d - Error: unable to unpack "
+                     "the commit message.", md->mdhim_rank);
 		return MDHIM_ERROR;
         }
 

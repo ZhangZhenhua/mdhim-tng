@@ -737,6 +737,7 @@ int get_stat_flush_global(struct mdhim_db *mdb, struct index_t *index) {
 	int stat_size = 0;
 	int master;
 	int num_items = 0;
+	char db_path[MDHIM_PATH_MAX] = {'\0'};
 	mdhim_open_db_t *opendb = NULL;
 
 	//Determine the size of the buffers to send based on the number and type of stats
@@ -749,9 +750,11 @@ int get_stat_flush_global(struct mdhim_db *mdb, struct index_t *index) {
 	}
 
 	recvbuf = NULL;
-	opendb = find_opendb_inc_ref(mdb->db_opts->db_path);
+	sprintf(db_path, "%s/%s", mdb->db_opts->db_path, mdb->db_opts->db_name);
+	opendb = find_opendb_inc_ref(db_path);
 	if (opendb == NULL) {
-		/* TODO error handling */
+		mlog(MDHIM_CLIENT_CRIT, "Can't find opendb for %s.", db_path);
+		goto error;
 	}
 
 	if (opendb->mdhim_store->mdhim_store_stats) {
@@ -905,7 +908,7 @@ int get_stat_flush_global(struct mdhim_db *mdb, struct index_t *index) {
 		free(tstat);
 	}
 
-	find_opendb_dec_ref(mdb->db_opts->db_path);
+	find_opendb_dec_ref(db_path);
 	free(recvbuf);
 	return MDHIM_SUCCESS;
 
@@ -933,6 +936,7 @@ int get_stat_flush_local(struct mdhim_db *mdb, struct index_t *index) {
 	void *tstat;
 	int stat_size = 0;
 	int num_items = 0;
+	char db_path[MDHIM_PATH_MAX] = {'\0'};
 	mdhim_open_db_t *opendb = NULL;
 
 	//Determine the size of the buffers to send based on the number and type of stats
@@ -945,6 +949,12 @@ int get_stat_flush_local(struct mdhim_db *mdb, struct index_t *index) {
 	}
 
 	recvbuf = NULL;
+	sprintf(db_path, "%s/%s", mdb->db_opts->db_path, mdb->db_opts->db_name);
+	opendb = find_opendb_inc_ref(db_path);
+	if (opendb == NULL) {
+		mlog(MDHIM_CLIENT_CRIT, "Can't find opendb for %s.", db_path);
+		goto error;
+	}
 	//Get the number stats in our hash table
 	if (opendb->mdhim_store->mdhim_store_stats) {
 		num_items = HASH_COUNT(opendb->mdhim_store->mdhim_store_stats);
@@ -1089,6 +1099,7 @@ int get_stat_flush_local(struct mdhim_db *mdb, struct index_t *index) {
 			free(tstat);
 		}
 	}
+	find_opendb_dec_ref(db_path);
 
 	free(recvbuf);
 	free(num_items_to_recv);
