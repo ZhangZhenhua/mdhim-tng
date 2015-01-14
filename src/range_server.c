@@ -405,9 +405,9 @@ void _build_db_path(char *path, char *client_path) {
 	sprintf(path, "%s-%d", client_path, mdhim_gdata.mdhim_rank);
 }
 
-/* XXX add lock to protect this hash table for the open/close
- * race. Well behavied applications should not have such issues. */
+/* Must hold lock before calling this function */
 int add_opendb(mdhim_open_db_t *opendb) {
+	int ret = 0;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
 	if (HASH_COUNT(mdhim_gdata.mdhim_rs->opendbs) == 0) {
@@ -415,7 +415,8 @@ int add_opendb(mdhim_open_db_t *opendb) {
 	} else {
 		HASH_ADD_STR(opendbs, db_path, opendb);
 	}
-	return 0;
+
+	return ret;
 }
 
 int del_opendb(char *path) {
@@ -423,12 +424,16 @@ int del_opendb(char *path) {
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
+	pthread_mutex_lock(&mdhim_gdata.mdhim_rs->opendbs_mutex);
+
 	_build_db_path(db_path, path);
 	HASH_FIND_STR(opendbs, db_path, outdb);
 	if (outdb != NULL) {
 		HASH_DEL(opendbs, outdb);
 		free(outdb);
 	}
+
+	pthread_mutex_unlock(&mdhim_gdata.mdhim_rs->opendbs_mutex);
 	return 0;
 }
 
@@ -437,14 +442,36 @@ mdhim_open_db_t* find_opendb(char *path) {
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
+	pthread_mutex_lock(&mdhim_gdata.mdhim_rs->opendbs_mutex);
+
 	_build_db_path(db_path, path);
 	HASH_FIND_STR(opendbs, db_path, outdb);
 
+	pthread_mutex_unlock(&mdhim_gdata.mdhim_rs->opendbs_mutex);
 	return outdb;
 }
 
 /* increase refcount if finding opendb in hash */
 mdhim_open_db_t* find_opendb_inc_ref(char *path) {
+	char db_path[MDHIM_PATH_MAX];
+	mdhim_open_db_t *outdb = NULL;
+	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
+
+	pthread_mutex_lock(&mdhim_gdata.mdhim_rs->opendbs_mutex);
+
+	_build_db_path(db_path, path);
+	HASH_FIND_STR(opendbs, db_path, outdb);
+	if (outdb != NULL) outdb->ref ++;
+
+	pthread_mutex_unlock(&mdhim_gdata.mdhim_rs->opendbs_mutex);
+	return outdb;
+}
+
+/*
+ * increase refcount if finding opendb in hash.
+ * Must hold lock before calling this function.
+ */
+mdhim_open_db_t* find_opendb_inc_ref_nolock(char *path) {
 	char db_path[MDHIM_PATH_MAX];
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
@@ -462,6 +489,8 @@ mdhim_open_db_t* find_opendb_dec_ref(char *path) {
 	mdhim_open_db_t *outdb = NULL;
 	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
+	pthread_mutex_lock(&mdhim_gdata.mdhim_rs->opendbs_mutex);
+
 	_build_db_path(db_path, path);
 	HASH_FIND_STR(opendbs, db_path, outdb);
 	if (outdb != NULL && outdb->ref > 0) {
@@ -474,6 +503,7 @@ mdhim_open_db_t* find_opendb_dec_ref(char *path) {
 		}
 	}
 
+	pthread_mutex_unlock(&mdhim_gdata.mdhim_rs->opendbs_mutex);
 	return outdb;
 }
 
@@ -501,6 +531,10 @@ int range_server_stop(struct mdhim_t *md) {
 	}
 	free(md->mdhim_rs->workers);
 		
+	if ((ret = pthread_mutex_destroy(&md->mdhim_rs->opendbs_mutex)) != 0) {
+	  mlog(MDHIM_SERVER_DBG, "Rank: %d - Error destroying opendbs mutex", 
+	       md->mdhim_rank);
+	}
 	//Destroy the condition variables
 	if ((ret = pthread_cond_destroy(md->mdhim_rs->work_ready_cv)) != 0) {
 	  mlog(MDHIM_SERVER_DBG, "Rank: %d - Error destroying work cond variable", 
@@ -562,9 +596,12 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 
 	mlog(MDHIM_SERVER_INFO, "MDHIM Rank %d: finding db %s.",
 			mdhim_gdata.mdhim_rank, om->basem.db_path);
-	opendb = find_opendb_inc_ref(om->basem.db_path);
+
+	pthread_mutex_lock(&mdhim_gdata.mdhim_rs->opendbs_mutex);
+
+	opendb = find_opendb_inc_ref_nolock(om->basem.db_path);
 	if (opendb != NULL) {
-		goto out;
+		goto unlock;
 	}
 
 	opendb = malloc(sizeof(mdhim_open_db_t));
@@ -572,25 +609,13 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 		mlog(MDHIM_SERVER_CRIT, "MDHIM Rank %d: Error while allocating "
 		     "memory.", mdhim_gdata.mdhim_rank);
 		ret = MDHIM_ERROR;
-		goto out;
+		goto unlock;
 	}
 	memset(opendb, '\0', sizeof(mdhim_open_db_t));
 
 	/* initialize mdhim_store */
 	mdhim_store = mdhim_db_init(om->db_type);
 	_build_db_path(opendb->db_path, om->basem.db_path);
-
-	ret = mdhim_store->open(&mdhim_store->db_handle, &mdhim_store->db_stats,
-				opendb->db_path, flags, om->db_key_type,
-				NULL /* letting opts = NULL*/);
-	if (ret != 0) {
-		mlog(MDHIM_SERVER_CRIT, "MDHIM Rank %d: Error while opening "
-		     "database, ret %d.", mdhim_gdata.mdhim_rank, ret);
-		free(opendb);
-		ret = MDHIM_ERROR;
-		goto out;
-	}
-
 	/* initialize and add mdhim_store in opendbs table */
 	opendb->ref = 1;
 	opendb->db_type = om->db_type;
@@ -600,11 +625,25 @@ int range_server_open(struct mdhim_t *md, struct mdhim_openm_t *om, int source) 
 	opendb->max_recs_per_slice = om->max_recs_per_slice;
 	opendb->mdhim_store = mdhim_store;
 
+
+	ret = mdhim_store->open(&mdhim_store->db_handle, &mdhim_store->db_stats,
+				opendb->db_path, flags, om->db_key_type,
+				NULL /* letting opts = NULL*/);
+	if (ret != 0) {
+		mlog(MDHIM_SERVER_CRIT, "MDHIM Rank %d: Error while opening "
+		     "database, ret %d.", mdhim_gdata.mdhim_rank, ret);
+		free(opendb);
+		ret = MDHIM_ERROR;
+		goto unlock;
+	}
+
 	add_opendb(opendb);
+
 	mlog(MDHIM_SERVER_DBG, "MDHIM Rank %d: adding %s to range svr opendb hash table.",
 			mdhim_gdata.mdhim_rank, opendb->db_path);
+unlock:
+	pthread_mutex_unlock(&mdhim_gdata.mdhim_rs->opendbs_mutex);
 
-out:
 	//Create the response message
 	rm = malloc(sizeof(struct mdhim_rm_t));
 	//Set the type
@@ -1740,6 +1779,12 @@ int range_server_init(struct mdhim_t *md, int num_wthreads) {
 
 	//Initialize the outstanding request list
 	md->mdhim_rs->out_req_list = NULL;
+
+	if ((ret = pthread_mutex_init(&md->mdhim_rs->opendbs_mutex, NULL)) != 0) {    
+		mlog(MDHIM_SERVER_CRIT, "MDHIM Rank: %d - " 
+		     "Error while initializing opendbs mutex", md->mdhim_rank);
+		return MDHIM_ERROR;
+	}
 
 	//Initialize work queue mutex
 	md->mdhim_rs->work_queue_mutex = malloc(sizeof(pthread_mutex_t));

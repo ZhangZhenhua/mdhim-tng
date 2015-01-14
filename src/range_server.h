@@ -57,6 +57,7 @@ typedef struct mdhim_rs_t {
 	pthread_t **workers;
 	struct index *indexes; /* A linked list of remote indexes that is served 
 				  (partially for fully) by this range server */
+	pthread_mutex_t opendbs_mutex;
 	mdhim_open_db_t *opendbs; /* hash tables */
 	//Records seconds spent on putting records
 	long double put_time;
