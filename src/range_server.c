@@ -408,13 +408,16 @@ void _build_db_path(char *path, char *client_path) {
 /* Must hold lock before calling this function */
 int add_opendb(mdhim_open_db_t *opendb) {
 	int ret = 0;
-	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 
+#if 0
+	mdhim_open_db_t *opendbs = mdhim_gdata.mdhim_rs->opendbs;
 	if (HASH_COUNT(mdhim_gdata.mdhim_rs->opendbs) == 0) {
 		HASH_ADD_STR(mdhim_gdata.mdhim_rs->opendbs, db_path, opendb);
 	} else {
 		HASH_ADD_STR(opendbs, db_path, opendb);
 	}
+#endif
+	HASH_ADD_STR(mdhim_gdata.mdhim_rs->opendbs, db_path, opendb);
 
 	return ret;
 }
@@ -1776,6 +1779,8 @@ int range_server_init(struct mdhim_t *md, int num_wthreads) {
 	md->mdhim_rs->work_queue->head = NULL;
 	md->mdhim_rs->work_queue->tail = NULL;
 	md->mdhim_rs->num_wthreads = num_wthreads;
+
+	md->mdhim_rs->opendbs = NULL;
 
 	//Initialize the outstanding request list
 	md->mdhim_rs->out_req_list = NULL;
